@@ -5,45 +5,59 @@ use semver::{Version, VersionReq};
 mod code;
 pub use code::FnBody;
 
+#[derive(Serialize, Deserialize, Debug, Hash, Eq, PartialEq)]
+pub struct Symbol(usize);
+
 /// A full path of module, submodules and optionally final name of a type/interface/function, based
 /// on context
 #[derive(Serialize, Deserialize, Debug, Hash, Eq, PartialEq)]
-pub struct Path(Vec<String>);
+pub struct Path(Vec<Symbol>);
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Hash, Eq, PartialEq)]
 pub enum Type {
     Unit,
     Bool,
-    Int { width: u8 },
+    Int { signed: bool, width: u8 },
     Float { width: u8 },
     String,
+    Array(Box<Type>, usize),
     Tuple(Vec<Type>),
-    User(Path),
-    Ref(Box<Type>)
+    /// (the type definition, any type parameters)
+    User(Path, Option<Vec<Type>>),
+    Ref(Box<Type>),
+    /// like Rust's &dyn A + B + C
+    AbstractRef(Vec<Path>),
+    FnRef(Path),
+    /// A reference to a type parameter inside a definition
+    Var(Symbol)
 }
 
 #[derive(Serialize, Deserialize, Debug)]
 pub enum TypeDefinition {
     Sum {
-        name: String,
-        variants: Vec<(String, TypeDefinition)>
+        name: Symbol,
+        /// (name of parameter, list of interfaces it must implement)
+        parameters: Vec<(Symbol, Vec<Path>)>,
+        variants: Vec<(Symbol, TypeDefinition)>
     },
     Product {
-        name: String,
-        fields: Vec<(String, Type)>
+        name: Symbol,
+        /// (name of parameter, list of interfaces it must implement)
+        parameters: Vec<(Symbol, Vec<Path>)>,
+        fields: Vec<(Symbol, Type)>
     }
 }
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Interface {
-    pub name: String,
+    pub name: Symbol,
     pub functions: Vec<FunctionSignature>
 }
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct FunctionSignature {
-    pub name: String,
-    pub args: Vec<(Type, String)>,
+    pub name: Symbol,
+    pub args: Vec<(Type, Symbol)>,
     pub return_type: Type
 }
 
@@ -54,9 +68,11 @@ pub struct Module {
     pub submodules: Vec<Module>,
     pub types: Vec<TypeDefinition>,
     pub interfaces: Vec<Interface>,
-    // This is a map from (type path, interface path) to a list of function bodies implementing
-    // each interface function, indexed by name
-    pub implementations: HashMap<(Path, Path), HashMap<String, FnBody>>,
+    /// (type, interface path) -> specific function names for implementation functions provided in this module,
+    /// in same order as interface function signature list
+    pub implementations: HashMap<(Type, Path), Vec<Symbol>>,
     pub functions: Vec<(FunctionSignature, FnBody)>,
-    pub imports: Vec<(Path, VersionReq)>
+    pub imports: Vec<(Path, VersionReq)>,
+    pub symbols: HashMap<Symbol, String>
 }
+
