@@ -6,7 +6,7 @@ mod code;
 pub use code::FnBody;
 
 #[derive(Serialize, Deserialize, Debug, Hash, Eq, PartialEq)]
-pub struct Symbol(usize);
+pub struct Symbol(String);
 
 /// A full path of module, submodules and optionally final name of a type/interface/function, based
 /// on context
@@ -20,14 +20,14 @@ pub enum Type {
     Int { signed: bool, width: u8 },
     Float { width: u8 },
     String,
-    Array(Box<Type>, usize),
+    Array(Box<Type>),
     Tuple(Vec<Type>),
     /// (the type definition, any type parameters)
     User(Path, Option<Vec<Type>>),
     Ref(Box<Type>),
     /// like Rust's &dyn A + B + C
     AbstractRef(Vec<Path>),
-    FnRef(Path),
+    FnRef(Box<FunctionSignature>),
     /// A reference to a type parameter inside a definition
     Var(Symbol)
 }
@@ -51,12 +51,11 @@ pub enum TypeDefinition {
 #[derive(Serialize, Deserialize, Debug)]
 pub struct Interface {
     pub name: Symbol,
-    pub functions: Vec<FunctionSignature>
+    pub functions: HashMap<Symbol, FunctionSignature>
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Hash, Eq, PartialEq)]
 pub struct FunctionSignature {
-    pub name: Symbol,
     pub args: Vec<(Type, Symbol)>,
     pub return_type: Type
 }
@@ -66,13 +65,11 @@ pub struct Module {
     pub name: String,
     pub version: Version,
     pub submodules: Vec<Module>,
-    pub types: Vec<TypeDefinition>,
-    pub interfaces: Vec<Interface>,
-    /// (type, interface path) -> specific function names for implementation functions provided in this module,
-    /// in same order as interface function signature list
-    pub implementations: HashMap<(Type, Path), Vec<Symbol>>,
-    pub functions: Vec<(FunctionSignature, FnBody)>,
+    pub types: HashMap<Symbol, TypeDefinition>,
+    pub interfaces: HashMap<Symbol, Interface>,
+    /// (type, interface path) -> specific function names for implementation functions provided in this module indexed by the interface function they implement
+    pub implementations: HashMap<(Type, Path), HashMap<Symbol, Symbol>>,
+    pub functions: HashMap<Symbol, (FunctionSignature, FnBody)>,
     pub imports: Vec<(Path, VersionReq)>,
-    pub symbols: HashMap<Symbol, String>
 }
 

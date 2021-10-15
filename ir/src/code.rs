@@ -37,14 +37,18 @@ pub enum Instruction {
     LoadAt(Register, Register, usize), // for strings, arrays, tuples and structs
     StoreAt(Register, Register, usize),
     // (path to function, parameters)
-    Call(Path, Vec<Value>),
+    Call(Register, Path, Vec<Value>),
     // (path to interface function, first parameter [type will be used to find implementation], rest of parameters)
-    CallImpl(Path, Value, Vec<Value>),
+    CallImpl(Register, Path, Value, Vec<Value>),
     Return(Option<Value>),
     /// create a function pointer
     RefFunc(Register, Path),
     /// (destination for true/false if matched, destination for inner value, value to test, variant to test for)
-    UnwrapVariant(Register, Option<Register>, Value, Symbol)
+    UnwrapVariant(Register, Option<Register>, Value, Symbol),
+    /// allocate a value on the heap and put a reference in the destination register
+    Alloc(Register, Type),
+    /// allocate an array of values on the heap and put an array value in the destination register
+    AllocArray(Register, Type, Value)
 }
 
 #[derive(Serialize, Deserialize, Debug)]
