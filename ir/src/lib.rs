@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use serde::{Serialize, Deserialize};
 use semver::{Version, VersionReq};
 
-mod code;
+pub mod code;
 pub use code::FnBody;
 
 #[derive(Serialize, Deserialize, Debug, Hash, Eq, PartialEq)]
@@ -12,6 +12,12 @@ pub struct Symbol(String);
 /// on context
 #[derive(Serialize, Deserialize, Debug, Hash, Eq, PartialEq)]
 pub struct Path(Vec<Symbol>);
+
+impl<T: AsRef<str>> From<T> for Path {
+    fn from(s: T) -> Self {
+        Path(s.as_ref().split("::").map(|s| Symbol(s.into())).collect())
+    }
+}
 
 #[derive(Serialize, Deserialize, Debug, Hash, Eq, PartialEq)]
 pub enum Type {

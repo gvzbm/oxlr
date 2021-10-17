@@ -59,5 +59,6 @@ pub struct BasicBlock {
 
 #[derive(Serialize, Deserialize, Debug)]
 pub struct FnBody {
+    pub max_registers: u32,
     pub blocks: Vec<BasicBlock>
 }
