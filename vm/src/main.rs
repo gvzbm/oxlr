@@ -2,17 +2,17 @@ use std::{cell::RefCell, collections::HashMap, sync::Arc};
 
 use anyhow::*;
 
-struct World {
-    top_modules: RefCell<HashMap<String, Arc<ir::Module>>>,
+struct World<'m> {
+    top_modules: RefCell<HashMap<String, Arc<ir::Module<'m>>>>,
 }
 
-impl World {
-    fn new() -> World {
+impl<'m> World<'m> {
+    fn new() -> World<'m> {
         todo!()
     }
 
     /// get a module, loading it from the filesystem if necessary by searching the module search paths
-    fn load_module(&self, path: &ir::Path) -> Result<Arc<ir::Module>> {
+    fn load_module(&self, path: &ir::Path) -> Result<Arc<ir::Module<'m>>> {
         todo!()
     }
 
@@ -66,11 +66,11 @@ enum Value {
 }
 
 struct Heap<'w> {
-    world: &'w World
+    world: &'w World<'w>
 }
 
 impl<'w> Heap<'w> {
-    fn new(world:&'w World)->Heap<'w> {
+    fn new(world:&'w World<'w>) -> Heap<'w> {
         Heap {
             world
         }
@@ -106,13 +106,13 @@ impl Frame {
 }
 
 struct Machine<'w> {
-    world: &'w World,
+    world: &'w World<'w>,
     heap: Heap<'w>,
     stack: Vec<Frame>
 }
 
 impl<'w> Machine<'w> {
-    fn new(world: &'w World) -> Machine<'w> {
+    fn new(world: &'w World<'w>) -> Machine<'w> {
         Machine {
             heap: Heap::new(world), world, stack: Vec::new()
         }
