@@ -5,15 +5,18 @@ use anyhow::*;
 struct World<'m> {
     global_module_path: std::path::PathBuf,
     local_module_path: std::path::PathBuf,
-    modules: HashMap<ir::Path<'m>, Rc<ir::Module<'m>>>,
+    modules: HashMap<ir::Path<'m>, ir::Module<'m>>,
 }
 
 fn test_module_file_candidate(dir_entry: &std::fs::DirEntry, path: &ir::Path, version_req: &ir::VersionReq) -> Option<std::path::PathBuf> {
     let filename = dir_entry.file_name().into_string().ok()?;
     let (fpath, fver) = filename.split_once('_')?;
+    log::trace!("testing {} as candidate for module", dir_entry.path().display());
     let fpath = ir::Path::from(fpath);
     let fver = ir::Version::parse(fver).ok()?;
+    log::trace!("candidate yielded: {} {}", fpath, fver);
     if fpath == *path && version_req.matches(&fver) {
+        log::trace!("matched");
         Some(dir_entry.path())
     } else {
         None
@@ -23,18 +26,18 @@ fn test_module_file_candidate(dir_entry: &std::fs::DirEntry, path: &ir::Path, ve
 impl<'m> World<'m> {
     fn new() -> Result<World<'m>> {
         Ok(World {
-            global_module_path: std::env::var("OXLR_MODULE_PATH").and_then(PathBuf::try_from)?,
+            global_module_path: std::env::var("OXLR_MODULE_PATH").map(std::path::PathBuf::from)?,
             local_module_path: std::env::current_dir()?,
             modules: HashMap::new()
         })
     }
 
     /// get a module, loading it from the filesystem if necessary by searching the module search paths
-    fn load_module<'s>(&mut self, path: &'s ir::Path<'m>, version: &ir::VersionReq) -> Result<Rc<ir::Module<'m>>> {
+    fn load_module<'s>(&mut self, path: &'s ir::Path<'m>, version: &ir::VersionReq) -> Result<()> {
         assert!(path.len() > 0);
         if let Some(m) = self.modules.get(path) {
             if version.matches(&m.version) {
-                Ok(m.clone())
+                Ok(())
             } else {
                 Err(anyhow!("mismatched versions of module {} required. version loaded: {}, version required: {}", path, m.version, version))
             }
@@ -52,12 +55,11 @@ impl<'m> World<'m> {
                         match mp {
                             Ok(m) => {
                                 if m.path == *path && version.matches(&m.version) {
-                                    let m = Rc::new(m);
-                                    self.modules.insert(path.clone(), m.clone());
                                     for (import_path, import_version) in m.imports.iter() {
                                         self.load_module(import_path, import_version)?;
                                     }
-                                    return Ok(m);
+                                    self.modules.insert(path.clone(), m);
+                                    return Ok(());
                                 }
                             },
                             Err(e) => log::warn!("tried to search for module {} v{}, got error decoding file {}: {}",
@@ -71,24 +73,36 @@ impl<'m> World<'m> {
         }
     }
 
+    fn get_module(&self, path: &ir::Path<'m>) -> Option<&ir::Module> {
+        self.modules.get(path)
+    }
+
     /// look up a type definition by path
-    fn get_type(&self, path: &ir::Path) -> Option<&ir::TypeDefinition> {
-        todo!()
+    fn get_type(&self, path: &'m ir::Path<'m>) -> Option<&'m ir::TypeDefinition> {
+        let m = self.get_module(&path.subpath(1))?;
+        m.types.get(path.last())
     }
 
     /// look up an interface by path
-    fn get_interface(&self, path: &ir::Path) -> Option<&ir::Interface> {
-        todo!()
+    fn get_interface(&self, path: &'m ir::Path) -> Option<&'m ir::Interface> {
+        let m = self.get_module(&path.subpath(1))?;
+        m.interfaces.get(path.last())
     }
 
     /// look up a function by path
-    fn get_function(&self, path: &ir::Path) -> Option<&(ir::FunctionSignature, ir::FnBody)> {
-        todo!()
+    fn get_function(&self, path: &'m ir::Path) -> Option<&'m (ir::FunctionSignature, ir::FnBody)> {
+        let m = self.get_module(&path.subpath(1))?;
+        m.functions.get(path.last())
     }
 
     /// look up the implementation function specific to type `ty` for the interface function `interface_fn`
-    fn find_impl(&self, interface_fn: &ir::Path, ty: &ir::Type) -> Option<&(ir::FunctionSignature, ir::FnBody)> {
-        todo!()
+    fn find_impl(&self, interface_fn: &'m ir::Path<'m>, ty: &ir::Type) -> Option<&'m (ir::FunctionSignature, ir::FnBody)> {
+        let if_path = interface_fn.subpath(1);
+        let fn_name = interface_fn.last();
+        let m = self.get_module(&interface_fn.subpath(2))?;
+        let fn_sym = m.implementations.get(&(ty.clone(), if_path))
+            .and_then(|m| m.get(fn_name))?;
+        m.functions.get(fn_sym)
     }
 }
 
@@ -161,14 +175,13 @@ impl Frame {
 }
 
 struct Machine<'w> {
-    world: &'w mut World<'w>,
+    world: &'w World<'w>,
     heap: Heap<'w>,
     stack: Vec<Frame>
 }
 
-/*
 impl<'w> Machine<'w> {
-    fn new(world: &'w mut World<'w>) -> Machine<'w> {
+    fn new(world: &'w World<'w>) -> Machine<'w> {
         Machine {
             heap: Heap::new(world), world, stack: Vec::new()
         }
@@ -176,7 +189,8 @@ impl<'w> Machine<'w> {
 
     /// start the virtual machine
     fn start(&mut self) {
-        let (_, body) = self.world.get_function(&"start".into())
+        let start_sym = &"start".into();
+        let (_, body) = self.world.get_function(&start_sym)
             .expect("a start function is present");
         let _ = self.call_fn(body, vec![]).unwrap();
     }
@@ -193,10 +207,16 @@ impl<'w> Machine<'w> {
         // gc needs access to both the stack and heap to know what is alive
         todo!()
     }
-}*/
+}
 
 fn main() {
-    let world = World::new();
-//    let mut m = Machine::new(&mut world);
- //   m.start();
+    env_logger::init();
+    let start_mod_path = std::env::args().nth(1).map(ir::Path::from).expect("module path command line argument");
+    let start_mod_version = std::env::args().nth(2)
+        .map(|vr| ir::VersionReq::parse(&vr).expect("parse starting module version req"))
+        .unwrap_or(ir::VersionReq::STAR);
+    let mut world = World::new().expect("initialize world");
+    world.load_module(&start_mod_path, &start_mod_version).expect("load starting module");
+    let mut m = Machine::new(&world);
+    m.start();
 }
