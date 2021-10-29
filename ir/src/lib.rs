@@ -13,8 +13,9 @@ pub struct Symbol<'a>(pub Cow<'a, str>);
 #[derive(Serialize, Deserialize, Debug, Hash, Eq, PartialEq, Clone)]
 pub struct Path<'a>(pub Vec<Symbol<'a>>);
 
-#[derive(Serialize, Deserialize, Debug, Hash, Eq, PartialEq)]
-pub enum Type {
+
+#[derive(Serialize, Deserialize, Debug, Hash, Eq, PartialEq, Clone)]
+pub enum Type<'a> {
     Unit,
     Bool,
     Int { signed: bool, width: u8 },
@@ -32,8 +33,8 @@ pub enum Type {
     Var(Symbol)
 }
 
-#[derive(Serialize, Deserialize, Debug)]
-pub enum TypeDefinition {
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub enum TypeDefinition<'a> {
     Sum {
         name: Symbol,
         /// (name of parameter, list of interfaces it must implement)
@@ -48,16 +49,16 @@ pub enum TypeDefinition {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug)]
-pub struct Interface {
-    pub name: Symbol,
-    pub functions: HashMap<Symbol, FunctionSignature>
+#[derive(Serialize, Deserialize, Debug, Clone)]
+pub struct Interface<'a> {
+    pub name: Symbol<'a>,
+    pub functions: HashMap<Symbol<'a>, FunctionSignature<'a>>
 }
 
-#[derive(Serialize, Deserialize, Debug, Hash, Eq, PartialEq)]
-pub struct FunctionSignature {
-    pub args: Vec<(Type, Symbol)>,
-    pub return_type: Type
+#[derive(Serialize, Deserialize, Debug, Hash, Eq, PartialEq, Clone)]
+pub struct FunctionSignature<'a> {
+    pub args: Vec<(Type<'a>, Symbol<'a>)>,
+    pub return_type: Type<'a>
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -84,6 +85,14 @@ impl<'a> Path<'a> {
 
     pub fn iter_mut(&mut self) -> impl Iterator<Item=&mut Symbol<'a>> {
         self.0.iter_mut()
+    }
+
+    pub fn subpath(&self, len: usize) -> Path {
+        Path(self.0[0..self.0.len()-len].to_vec())
+    }
+
+    pub fn last(&self) -> &Symbol {
+        self.0.last().expect("paths must have at least one element")
     }
 }
 
