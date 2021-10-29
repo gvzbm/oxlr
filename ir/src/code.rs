@@ -1,31 +1,31 @@
 use serde::{Serialize, Deserialize};
 use super::{Symbol, Path, Type};
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Register(u32);
 
 pub type BlockIndex = usize;
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub enum Value {
     Literal(usize),
     Reg(Register)
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub enum BinOp {
     Add, Sub, Mul, Div,
     Shl, Shr,
     LAnd, LOr, Eq, NEq, Less, Greater, LessEq, GreaterEq
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub enum UnaryOp {
     LogNot, BitNot, Neg
 }
 
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub enum Instruction<'a> {
     Phi(Vec<(Value, BlockIndex)>),
     Br { cond: Value, if_true: BlockIndex, if_false: BlockIndex },
@@ -51,13 +51,13 @@ pub enum Instruction<'a> {
     AllocArray(Register, Type<'a>, Value)
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct BasicBlock<'a> {
     pub instrs: Vec<Instruction<'a>>,
     pub next_block: BlockIndex
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct FnBody<'a> {
     pub max_registers: u32,
     pub blocks: Vec<BasicBlock<'a>>

@@ -14,7 +14,7 @@ pub struct Symbol<'a>(pub Cow<'a, str>);
 pub struct Path<'a>(pub Vec<Symbol<'a>>);
 
 
-#[derive(Serialize, Deserialize, Debug, Hash, Eq, PartialEq)]
+#[derive(Serialize, Deserialize, Debug, Hash, Eq, PartialEq, Clone)]
 pub enum Type<'a> {
     Unit,
     Bool,
@@ -33,7 +33,7 @@ pub enum Type<'a> {
     Var(Symbol<'a>)
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub enum TypeDefinition<'a> {
     Sum {
         name: Symbol<'a>,
@@ -49,13 +49,13 @@ pub enum TypeDefinition<'a> {
     }
 }
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Interface<'a> {
     pub name: Symbol<'a>,
     pub functions: HashMap<Symbol<'a>, FunctionSignature<'a>>
 }
 
-#[derive(Serialize, Deserialize, Debug, Hash, Eq, PartialEq)]
+#[derive(Serialize, Deserialize, Debug, Hash, Eq, PartialEq, Clone)]
 pub struct FunctionSignature<'a> {
     pub args: Vec<(Type<'a>, Symbol<'a>)>,
     pub return_type: Type<'a>
@@ -85,6 +85,14 @@ impl<'a> Path<'a> {
 
     pub fn iter_mut(&mut self) -> impl Iterator<Item=&mut Symbol<'a>> {
         self.0.iter_mut()
+    }
+
+    pub fn subpath(&self, len: usize) -> Path {
+        Path(self.0[0..self.0.len()-len].to_vec())
+    }
+
+    pub fn last(&self) -> &Symbol {
+        self.0.last().expect("paths must have at least one element")
     }
 }
 
