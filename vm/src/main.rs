@@ -1,19 +1,74 @@
-use std::{cell::RefCell, collections::HashMap, sync::Arc};
+use std::{cell::RefCell, collections::HashMap, rc::Rc, borrow::Cow};
 
 use anyhow::*;
 
 struct World<'m> {
-    top_modules: RefCell<HashMap<String, Arc<ir::Module<'m>>>>,
+    global_module_path: std::path::PathBuf,
+    local_module_path: std::path::PathBuf,
+    modules: HashMap<ir::Path<'m>, Rc<ir::Module<'m>>>,
+}
+
+fn test_module_file_candidate(dir_entry: &std::fs::DirEntry, path: &ir::Path, version_req: &ir::VersionReq) -> Option<std::path::PathBuf> {
+    let filename = dir_entry.file_name().into_string().ok()?;
+    let (fpath, fver) = filename.split_once('_')?;
+    let fpath = ir::Path::from(fpath);
+    let fver = ir::Version::parse(fver).ok()?;
+    if fpath == *path && version_req.matches(&fver) {
+        Some(dir_entry.path())
+    } else {
+        None
+    }
 }
 
 impl<'m> World<'m> {
-    fn new() -> World<'m> {
-        todo!()
+    fn new() -> Result<World<'m>> {
+        Ok(World {
+            global_module_path: std::env::var("OXLR_MODULE_PATH").and_then(PathBuf::try_from)?,
+            local_module_path: std::env::current_dir()?,
+            modules: HashMap::new()
+        })
     }
 
     /// get a module, loading it from the filesystem if necessary by searching the module search paths
-    fn load_module(&self, path: &ir::Path) -> Result<Arc<ir::Module<'m>>> {
-        todo!()
+    fn load_module<'s>(&mut self, path: &'s ir::Path<'m>, version: &ir::VersionReq) -> Result<Rc<ir::Module<'m>>> {
+        assert!(path.len() > 0);
+        if let Some(m) = self.modules.get(path) {
+            if version.matches(&m.version) {
+                Ok(m.clone())
+            } else {
+                Err(anyhow!("mismatched versions of module {} required. version loaded: {}, version required: {}", path, m.version, version))
+            }
+        } else {
+            for mod_file in
+                std::fs::read_dir(&self.global_module_path)?
+                    .filter_map(|re| re.map(|e| test_module_file_candidate(&e, path, version)).transpose())
+                    .chain(std::fs::read_dir(&self.local_module_path)?
+                                .filter_map(|re| re.map(|e| test_module_file_candidate(&e, path, version)).transpose()))
+                    .map(|rfp| rfp.and_then(|fp| Ok((std::fs::File::open(&fp)?, fp))))
+            {
+                match mod_file {
+                    Ok((f, fp)) => {
+                        let mp: Result<ir::Module, _> = rmp_serde::from_read(f);
+                        match mp {
+                            Ok(m) => {
+                                if m.path == *path && version.matches(&m.version) {
+                                    let m = Rc::new(m);
+                                    self.modules.insert(path.clone(), m.clone());
+                                    for (import_path, import_version) in m.imports.iter() {
+                                        self.load_module(import_path, import_version)?;
+                                    }
+                                    return Ok(m);
+                                }
+                            },
+                            Err(e) => log::warn!("tried to search for module {} v{}, got error decoding file {}: {}",
+                                path, version, fp.display(), e)
+                        }
+                    },
+                    Err(e) => log::error!("tried to search for module {} v{}, got error in process: {}", path, version, e)
+                }
+            }
+            Err(anyhow!("could not find module {} v{}", path, version))
+        }
     }
 
     /// look up a type definition by path
@@ -106,13 +161,14 @@ impl Frame {
 }
 
 struct Machine<'w> {
-    world: &'w World<'w>,
+    world: &'w mut World<'w>,
     heap: Heap<'w>,
     stack: Vec<Frame>
 }
 
+/*
 impl<'w> Machine<'w> {
-    fn new(world: &'w World<'w>) -> Machine<'w> {
+    fn new(world: &'w mut World<'w>) -> Machine<'w> {
         Machine {
             heap: Heap::new(world), world, stack: Vec::new()
         }
@@ -137,10 +193,10 @@ impl<'w> Machine<'w> {
         // gc needs access to both the stack and heap to know what is alive
         todo!()
     }
-}
+}*/
 
 fn main() {
     let world = World::new();
-    let mut m = Machine::new(&world);
-    m.start();
+//    let mut m = Machine::new(&mut world);
+ //   m.start();
 }
