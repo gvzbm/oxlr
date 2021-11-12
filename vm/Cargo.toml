@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+itertools = "0.10"
 anyhow = "1"
 log = "0.4"
 env_logger = "0.8"

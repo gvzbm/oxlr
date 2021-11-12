@@ -1,4 +1,5 @@
 use std::{cell::RefCell, collections::HashMap, rc::Rc, borrow::Cow};
+use itertools::Itertools;
 
 use anyhow::*;
 
@@ -6,6 +7,7 @@ struct World<'m> {
     global_module_path: std::path::PathBuf,
     local_module_path: std::path::PathBuf,
     modules: HashMap<ir::Path<'m>, ir::Module<'m>>,
+    instantiated_types: HashMap<(ir::Path<'m>, Vec<ir::Type<'m>>), ir::TypeDefinition<'m>>
 }
 
 fn test_module_file_candidate(dir_entry: &std::fs::DirEntry, path: &ir::Path, version_req: &ir::VersionReq) -> Option<std::path::PathBuf> {
@@ -28,7 +30,8 @@ impl<'m> World<'m> {
         Ok(World {
             global_module_path: std::env::var("OXLR_MODULE_PATH").map(std::path::PathBuf::from)?,
             local_module_path: std::env::current_dir()?,
-            modules: HashMap::new()
+            modules: HashMap::new(),
+            instantiated_types: HashMap::new()
         })
     }
 
@@ -104,6 +107,42 @@ impl<'m> World<'m> {
             .and_then(|m| m.get(fn_name))?;
         m.functions.get(fn_sym)
     }
+
+    fn size_of_user_type(&self, td: &ir::TypeDefinition<'m>, params: &Option<Vec<ir::Type<'m>>>) -> Result<usize> {
+        if let Some(_) = params {
+            todo!("compute the size of a specialized generic type");
+        } else {
+            match td {
+                ir::TypeDefinition::Sum { variants, .. } => {
+                    variants.iter().map(|(_, td)| self.size_of_user_type(td, &None))
+                        .fold_ok(0, |a, b| a.max(b))
+                },
+                ir::TypeDefinition::Product { fields, .. } => {
+                    fields.iter().map(|(_,t)| self.size_of_type(t)).fold_ok(0, std::ops::Add::add)
+                }
+                ir::TypeDefinition::NewType(t) => self.size_of_type(t),
+            }
+        }
+    }
+
+    /// get the size this type would take in bytes
+    fn size_of_type(&self, ty: &ir::Type) -> Result<usize> {
+        use ir::Type;
+        Ok(match ty {
+            Type::Unit => 0,
+            Type::Bool => 1,
+            Type::Int { width, .. } => *width as usize / 8,
+            Type::Float { width } => *width as usize / 8,
+            Type::Ref(_) | Type::AbstractRef(_) | Type::Array(_) => std::mem::size_of::<*mut usize>(),
+            Type::Tuple(t) => t.iter().map(|t| self.size_of_type(t)).fold_ok(0, std::ops::Add::add)?,
+            Type::User(def_path, params) => self.get_type(def_path).ok_or_else(|| anyhow!(""))
+                .and_then(|t| self.size_of_user_type(t, params))?,
+            Type::FnRef(_) => 0, //for now not sure what we'll actually store here
+            Type::Var(_) => panic!(),
+        })
+    }
+
+
 }
 
 #[derive(Clone, Debug)]
@@ -118,47 +157,182 @@ enum Integer {
     S64(i64),
 }
 
+impl Integer {
+    fn width(&self) -> u8 {
+        match self {
+            Integer::U8(_) | Integer::S8(_) => 8,
+            Integer::U16(_) | Integer::S16(_) => 16,
+            Integer::U32(_) | Integer::S32(_) => 32,
+            Integer::U64(_) | Integer::S64(_) => 64,
+        }
+    }
+
+    fn signed(&self) -> bool {
+        match self {
+            Integer::U8(_) | Integer::U16(_) | Integer::U32(_) | Integer::U64(_) => false,
+            Integer::S8(_) | Integer::S16(_) | Integer::S32(_) | Integer::S64(_) => true,
+        }
+    }
+}
+
+
 #[derive(Clone, Debug)]
 enum Float {
     F32(f32),
     F64(f64)
 }
 
+impl Float {
+    fn width(&self) -> u8 {
+        match self {
+            Float::F32(_) => 32,
+            Float::F64(_) => 64,
+        }
+    }
+}
+
+
 /// Values have an implicit lifetime tied to the Heap they were allocated on
 #[derive(Clone, Debug)]
 enum Value {
     Nil, Bool(bool),
-    String(*mut str),
     Int(Integer),
     Float(Float),
     Ref(*mut Value), Array(*mut Value), Fn
 }
 
-struct Heap<'w> {
-    world: &'w World<'w>
+impl Value {
+    fn type_of<'w>(&self, mem: &Memory<'w>) -> ir::Type<'w> {
+        match self {
+            Value::Nil => ir::Type::Unit,
+            Value::Bool(_) => ir::Type::Bool,
+            Value::Int(i) => ir::Type::Int { signed: i.signed(), width: i.width() },
+            Value::Float(f) => ir::Type::Float { width: f.width() },
+            Value::Ref(v) => mem.type_for(*v),
+            Value::Array(v) => mem.type_for(*v),
+            Value::Fn => ir::Type::FnRef(todo!()),
+        }
+    }
 }
 
-impl<'w> Heap<'w> {
-    fn new(world:&'w World<'w>) -> Heap<'w> {
-        Heap {
-            world
+mod mem {
+    pub struct Header<'m> {
+        pub ty: Box<ir::Type<'m>>,
+        pub elements: usize,
+        pub prev: *mut Header<'m>
+    }
+}
+
+struct Memory<'w> {
+    world: &'w World<'w>,
+    last_alloc: *mut mem::Header<'w>,
+    max_size: usize, current_size: usize,
+
+    stack: Vec<Frame>
+}
+
+use std::alloc::Layout;
+
+impl<'w> Memory<'w> {
+    fn new(world:&'w World<'w>) -> Memory<'w> {
+        Memory {
+            world, last_alloc: std::ptr::null_mut(),
+            max_size: 4 * 1024 * 1024 * 1024, // 4GiB
+            current_size: 0,
+            stack: Vec::new()
         }
     }
 
     /// allocate a new value on the heap, and return a reference value
-    fn alloc(&mut self, ty: ir::Type) -> Result<Value> {
-        todo!()
+    fn alloc(&mut self, ty: &ir::Type<'w>) -> Result<Value> {
+        if let ir::Type::Array(_) = ty {
+            bail!("use alloc_array to allocate arrays");
+        }
+
+        let mut ran_gc = false;
+        loop {
+            let layout = Layout::from_size_align(std::mem::size_of::<mem::Header>() + self.world.size_of_type(ty)?, 8)?;
+            unsafe {
+                if self.current_size + layout.size() > self.max_size {
+                    if ran_gc {
+                        bail!("memory exhausted, increase max heap size from {} (current size = {}, attempted to allocate {} for {:?})",
+                            self.max_size, self.current_size, layout.size(), ty)
+                    } else {
+                        ran_gc = true;
+                        self.gc();
+                        continue;
+                    }
+                }
+                // we use the system allocator to get some new memory
+                let mem = std::alloc::alloc(layout) as *mut mem::Header;
+                (&mut *mem).ty = Box::new(ty.clone());
+                (&mut *mem).elements = 1;
+                // make sure we can still find this allocation if there aren't any other references to
+                // it when we do garbage collection
+                (&mut *mem).prev = self.last_alloc;
+                self.last_alloc = mem;
+                self.current_size += layout.size();
+                // should this be aligned?
+                return Ok(Value::Ref(mem.offset(std::mem::size_of::<mem::Header>() as isize) as *mut Value));
+            }
+        }
+    }
+
+    fn alloc_array(&mut self, el_ty: &ir::Type<'w>, count: usize) -> Result<Value> {
+        let mut ran_gc = false;
+        loop {
+            let layout = Layout::from_size_align(std::mem::size_of::<mem::Header>() + self.world.size_of_type(el_ty)?*count, 8)?;
+            unsafe {
+                if self.current_size + layout.size() > self.max_size {
+                    if ran_gc {
+                        bail!("memory exhausted, increase max heap size from {} (current size = {}, attempted to allocate {} for {} x {:?})",
+                            self.max_size, self.current_size, layout.size(), count, el_ty)
+                    } else {
+                        ran_gc = true;
+                        self.gc();
+                        continue;
+                    }
+                }
+                // we use the system allocator to get some new memory
+                let mem = std::alloc::alloc(layout) as *mut mem::Header;
+                (&mut *mem).ty = Box::new(el_ty.clone());
+                (&mut *mem).elements = count;
+                // make sure we can still find this allocation if there aren't any other references to
+                // it when we do garbage collection
+                (&mut *mem).prev = self.last_alloc;
+                self.last_alloc = mem;
+                self.current_size += layout.size();
+                // should this be aligned?
+                return Ok(Value::Array(mem.offset(std::mem::size_of::<mem::Header>() as isize) as *mut Value));
+            }
+        }
+    }
+
+    fn type_for(&self, rf: *mut Value) -> ir::Type<'w> {
+        let header = unsafe {&*(rf.offset(-(std::mem::size_of::<mem::Header>() as isize)) as *mut mem::Header)};
+        *(header.ty.clone())
+    }
+
+    fn element_count(&self, rf: *mut Value) -> usize {
+        let header = unsafe {&*(rf.offset(-(std::mem::size_of::<mem::Header>() as isize)) as *mut mem::Header)};
+        header.elements
     }
 
     /// move a value into the heap, returning a reference value
     fn box_value(&mut self, val: Value) -> Result<Value> {
-        todo!()
+        match self.alloc(&val.type_of(self))? {
+            Value::Ref(r) => {
+                unsafe { *r = val; }
+                Ok(Value::Ref(r))
+            }
+            _ => unreachable!()
+        }
     }
 
-    /// inform the heap that this reference is being invalidated and that the value it points to
-    /// may now be garbage
-    fn free(&mut self, reference: Value) {
-        todo!()
+    /// run garbage collection
+    fn gc(&mut self) {
+        // gc needs access to both the stack and heap to know what is alive
+        log::info!("running garbage collection. current size={}, max size={}", self.current_size, self.max_size);
     }
 }
 
@@ -176,14 +350,13 @@ impl Frame {
 
 struct Machine<'w> {
     world: &'w World<'w>,
-    heap: Heap<'w>,
-    stack: Vec<Frame>
+    mem: Memory<'w>,
 }
 
 impl<'w> Machine<'w> {
     fn new(world: &'w World<'w>) -> Machine<'w> {
         Machine {
-            heap: Heap::new(world), world, stack: Vec::new()
+            mem: Memory::new(world), world
         }
     }
 
@@ -197,16 +370,11 @@ impl<'w> Machine<'w> {
 
     /// look up and call a function by interpreting its body to determine the return value
     fn call_fn(&mut self, body: &ir::FnBody, args: Vec<Value>) -> Result<Value> {
-        self.stack.push(Frame::new(body.max_registers as usize));
-        let cur_frame = self.stack.last().unwrap();
+        self.mem.stack.push(Frame::new(body.max_registers as usize));
+        let cur_frame = self.mem.stack.last().unwrap();
         todo!()
     }
 
-    /// run garbage collection
-    fn gc(&mut self) {
-        // gc needs access to both the stack and heap to know what is alive
-        todo!()
-    }
 }
 
 fn main() {
