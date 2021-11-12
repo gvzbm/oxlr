@@ -13,14 +13,12 @@ pub struct Symbol<'a>(pub Cow<'a, str>);
 #[derive(Serialize, Deserialize, Debug, Hash, Eq, PartialEq, Clone)]
 pub struct Path<'a>(pub Vec<Symbol<'a>>);
 
-
 #[derive(Serialize, Deserialize, Debug, Hash, Eq, PartialEq, Clone)]
 pub enum Type<'a> {
     Unit,
     Bool,
     Int { signed: bool, width: u8 },
     Float { width: u8 },
-    String,
     Array(Box<Type<'a>>),
     Tuple(Vec<Type<'a>>),
     /// (the type definition, any type parameters)
@@ -35,14 +33,13 @@ pub enum Type<'a> {
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub enum TypeDefinition<'a> {
+    NewType(Type<'a>),
     Sum {
-        name: Symbol<'a>,
         /// (name of parameter, list of interfaces it must implement)
         parameters: Vec<(Symbol<'a>, Vec<Path<'a>>)>,
         variants: Vec<(Symbol<'a>, TypeDefinition<'a>)>
     },
     Product {
-        name: Symbol<'a>,
         /// (name of parameter, list of interfaces it must implement)
         parameters: Vec<(Symbol<'a>, Vec<Path<'a>>)>,
         fields: Vec<(Symbol<'a>, Type<'a>)>
@@ -125,4 +122,3 @@ impl<'a> std::ops::IndexMut<usize> for Path<'a> {
         &mut self.0[index]
     }
 }
-
