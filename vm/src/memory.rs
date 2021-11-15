@@ -17,6 +17,11 @@ pub struct Memory<'w> {
     pub stack: Vec<Frame>
 }
 
+//TODO: it is most likely going to be the most convenient to control the layout of memory in the
+//heap. need to transition from using *mut Value in refs to having some sort of heap handle type
+//thing that allows for reading/writing the value in the heap and automatically takes care of field
+//accesses/array indexing. It should be easy to get the right info from the heap metadata and then
+//calculate the byte offset and convert the bytes into a value
 
 impl<'w> Memory<'w> {
     pub fn new(world:&'w World<'w>) -> Memory<'w> {
@@ -36,7 +41,7 @@ impl<'w> Memory<'w> {
 
         let mut ran_gc = false;
         loop {
-            let layout = Layout::from_size_align(size_of::<Header>() + self.world.size_of_type(ty)?, 8)?;
+            let layout = Layout::from_size_align(size_of::<Header>() + size_of::<Value>(), 8)?;
             unsafe {
                 if self.current_size + layout.size() > self.max_size {
                     if ran_gc {
@@ -58,7 +63,7 @@ impl<'w> Memory<'w> {
                 self.last_alloc = mem;
                 self.current_size += layout.size();
                 // should this be aligned?
-                return Ok(Value::Ref(mem.offset(size_of::<Header>() as isize) as *mut Value));
+                return Ok(Value::Ref(mem.offset(1) as *mut Value));
             }
         }
     }
@@ -66,7 +71,7 @@ impl<'w> Memory<'w> {
     pub fn alloc_array(&mut self, el_ty: &ir::Type<'w>, count: usize) -> Result<Value> {
         let mut ran_gc = false;
         loop {
-            let layout = Layout::from_size_align(size_of::<Header>() + self.world.size_of_type(el_ty)?*count, 8)?;
+            let layout = Layout::from_size_align(size_of::<Header>() + size_of::<Value>()*count, 8)?;
             unsafe {
                 if self.current_size + layout.size() > self.max_size {
                     if ran_gc {
@@ -88,18 +93,18 @@ impl<'w> Memory<'w> {
                 self.last_alloc = mem;
                 self.current_size += layout.size();
                 // should this be aligned?
-                return Ok(Value::Array(mem.offset(size_of::<Header>() as isize) as *mut Value));
+                return Ok(Value::Array(mem.offset(1) as *mut Value));
             }
         }
     }
 
     pub fn type_for(&self, rf: *mut Value) -> ir::Type<'w> {
-        let header = unsafe {&*(rf.offset(-(size_of::<Header>() as isize)) as *mut Header)};
+        let header = unsafe {&*((rf as *mut u8).offset(-(size_of::<Header>() as isize)) as *mut Header)};
         *(header.ty.clone())
     }
 
     pub fn element_count(&self, rf: *mut Value) -> usize {
-        let header = unsafe {&*(rf.offset(-(size_of::<Header>() as isize)) as *mut Header)};
+        let header = unsafe {&*((rf as *mut u8).offset(-(size_of::<Header>() as isize)) as *mut Header)};
         header.elements
     }
 
@@ -119,6 +124,10 @@ impl<'w> Memory<'w> {
         // gc needs access to both the stack and heap to know what is alive
         log::info!("running garbage collection. current size={}, max size={}", self.current_size, self.max_size);
     }
+
+    pub fn cur_frame(&mut self) -> &mut Frame {
+        self.stack.last_mut().unwrap()
+    }
 }
 
 pub struct Frame {
@@ -129,6 +138,23 @@ impl Frame {
     pub fn new(num_reg: usize) -> Frame {
         Frame {
             registers: std::iter::repeat(Value::Nil).take(num_reg).collect()
+        }
+    }
+
+    pub fn load(&self, ix: &ir::code::Register) -> Value {
+        self.registers[ix.0 as usize].clone()
+    }
+
+    pub fn store(&mut self, ix: &ir::code::Register, v: Value) {
+        self.registers[ix.0 as usize] = v;
+    }
+
+    pub fn convert_value(&self, val: &ir::code::Value) -> Value {
+        match val {
+            ir::code::Value::LiteralInt(_) => todo!(),
+            ir::code::Value::LiteralFloat(_) => todo!(),
+            ir::code::Value::LiteralString(_) => todo!(),
+            ir::code::Value::Reg(_) => todo!(),
         }
     }
 }
