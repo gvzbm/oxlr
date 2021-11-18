@@ -1,14 +1,18 @@
+use std::borrow::Cow;
+
 use serde::{Serialize, Deserialize};
 use super::{Symbol, Path, Type};
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct Register(u32);
+pub struct Register(pub u32);
 
 pub type BlockIndex = usize;
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub enum Value {
-    Literal(usize),
+    LiteralInt(usize),
+    LiteralFloat(f64),
+    LiteralString(String),
     Reg(Register)
 }
 
@@ -26,39 +30,51 @@ pub enum UnaryOp {
 
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
-pub enum Instruction<'a> {
-    Phi(Vec<(Value, BlockIndex)>),
+pub enum Instruction {
+    Phi(Register, std::collections::HashMap<BlockIndex, Value>),
     Br { cond: Value, if_true: BlockIndex, if_false: BlockIndex },
     BinaryOp(BinOp, Register, Value, Value),
-    UnaryOp(UnaryOp, Register, Value, Value),
-    Store(Register, Value),
+    UnaryOp(UnaryOp, Register, Value),
+    LoadImm(Register, Value),
+
+    /// Get the value behind a reference
     LoadRef(Register, Register),
+    /// Move a value into a reference
     StoreRef(Register, Register),
-    LoadAt(Register, Register, usize), // for strings, arrays, tuples and structs
-    StoreAt(Register, Register, usize),
-    // (path to function, parameters)
-    Call(Register, Path<'a>, Vec<Value>),
-    // (path to interface function, first parameter [type will be used to find implementation], rest of parameters)
-    CallImpl(Register, Path<'a>, Value, Vec<Value>),
+    /// Load at an index into an array or tuple
+    LoadIndex(Register, Register, Value),
+    /// Store at an index into an array or tuple
+    StoreIndex(Register, Register, Value),
+
+    /// Load a value in a field in a structure
+    LoadField(Register, Register, Symbol),
+    /// Store a value in a field in a structure
+    StoreField(Register, Register, Symbol),
+
+    /// (path to function, parameters)
+    Call(Register, Path, Vec<Value>),
+    /// (path to interface function, parameters) the first parameter's type will be used to find the implementation
+    CallImpl(Register, Path, Vec<Value>),
     Return(Option<Value>),
+
     /// create a function pointer
-    RefFunc(Register, Path<'a>),
+    RefFunc(Register, Path),
     /// (destination for true/false if matched, destination for inner value, value to test, variant to test for)
-    UnwrapVariant(Register, Option<Register>, Value, Symbol<'a>),
+    UnwrapVariant(Register, Option<Register>, Value, Symbol),
     /// allocate a value on the heap and put a reference in the destination register
-    Alloc(Register, Type<'a>),
+    Alloc(Register, Type),
     /// allocate an array of values on the heap and put an array value in the destination register
-    AllocArray(Register, Type<'a>, Value)
+    AllocArray(Register, Type, Value)
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct BasicBlock<'a> {
-    pub instrs: Vec<Instruction<'a>>,
+pub struct BasicBlock {
+    pub instrs: Vec<Instruction>,
     pub next_block: BlockIndex
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
-pub struct FnBody<'a> {
+pub struct FnBody {
     pub max_registers: u32,
-    pub blocks: Vec<BasicBlock<'a>>
+    pub blocks: Vec<BasicBlock>
 }
