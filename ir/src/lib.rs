@@ -21,31 +21,31 @@ pub enum Type<'a> {
     Int { signed: bool, width: u8 },
     Float { width: u8 },
     String,
-    Array(Box<Type>),
-    Tuple(Vec<Type>),
+    Array(Box<Type<'a>>),
+    Tuple(Vec<Type<'a>>),
     /// (the type definition, any type parameters)
-    User(Path, Option<Vec<Type>>),
-    Ref(Box<Type>),
+    User(Path<'a>, Option<Vec<Type<'a>>>),
+    Ref(Box<Type<'a>>),
     /// like Rust's &dyn A + B + C
-    AbstractRef(Vec<Path>),
-    FnRef(Box<FunctionSignature>),
+    AbstractRef(Vec<Path<'a>>),
+    FnRef(Box<FunctionSignature<'a>>),
     /// A reference to a type parameter inside a definition
-    Var(Symbol)
+    Var(Symbol<'a>)
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub enum TypeDefinition<'a> {
     Sum {
-        name: Symbol,
+        name: Symbol<'a>,
         /// (name of parameter, list of interfaces it must implement)
-        parameters: Vec<(Symbol, Vec<Path>)>,
-        variants: Vec<(Symbol, TypeDefinition)>
+        parameters: Vec<(Symbol<'a>, Vec<Path<'a>>)>,
+        variants: Vec<(Symbol<'a>, TypeDefinition<'a>)>
     },
     Product {
-        name: Symbol,
+        name: Symbol<'a>,
         /// (name of parameter, list of interfaces it must implement)
-        parameters: Vec<(Symbol, Vec<Path>)>,
-        fields: Vec<(Symbol, Type)>
+        parameters: Vec<(Symbol<'a>, Vec<Path<'a>>)>,
+        fields: Vec<(Symbol<'a>, Type<'a>)>
     }
 }
 
@@ -68,15 +68,19 @@ pub struct Module<'a> {
     pub types: HashMap<Symbol<'a>, TypeDefinition<'a>>,
     pub interfaces: HashMap<Symbol<'a>, Interface<'a>>,
     /// (type, interface path) -> specific function names for implementation functions provided in this module indexed by the interface function they implement
-    pub implementations: HashMap<(Type, Path), HashMap<Symbol, Symbol>>,
-    pub functions: HashMap<Symbol, (FunctionSignature, FnBody)>,
-    pub imports: Vec<(Path, VersionReq)>,
+    pub implementations: HashMap<(Type<'a>, Path<'a>), HashMap<Symbol<'a>, Symbol<'a>>>,
+    pub functions: HashMap<Symbol<'a>, (FunctionSignature<'a>, FnBody<'a>)>,
+    pub imports: Vec<(Path<'a>, VersionReq)>,
 }
 
 
 impl<'a> Path<'a> {
     pub fn len(&self) -> usize {
         self.0.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
     }
 
     pub fn iter(&self) -> impl Iterator<Item=&Symbol> {
