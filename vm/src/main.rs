@@ -24,10 +24,10 @@ impl<'w> Machine<'w> {
 
     /// start the virtual machine
     fn start(&mut self) {
-    //     let start_sym = &"start".into();
-    //     let (_, body) = self.world.get_function(&start_sym)
-    //         .expect("a start function is present");
-    //     let _ = self.call_fn(body, vec![]).unwrap();
+         let start_sym = &"start".into();
+         let (_, body) = self.world.get_function(&start_sym)
+             .expect("a start function is present");
+         let _ = self.call_fn(body, vec![]).unwrap();
     }
 
     /// look up and call a function by interpreting its body to determine the return value
@@ -61,6 +61,7 @@ impl<'w> Machine<'w> {
                             _ => bail!("expected bool")
                         }
                     },
+
                     Instruction::BinaryOp(op, dest, lhs, rhs) => {
                         use ir::code::BinOp;
                         let lhs = self.mem.cur_frame().convert_value(lhs);
@@ -86,7 +87,7 @@ impl<'w> Machine<'w> {
                         let res = match (op, inp) {
                             (UnaryOp::LogNot, Value::Bool(v)) => Value::Bool(!v),
                             (UnaryOp::BitNot, Value::Int(v)) => Value::Int(v.bitwise_negate()),
-                            (UnaryOp::Neg,    Value::Int(v)) if v.signed() => Value::Int(v.negate()),
+                            (UnaryOp::Neg,    Value::Int(v)) if v.signed => Value::Int(v.negate()),
                             _ => bail!("invalid operand to unary operation")
                         };
                         self.mem.cur_frame().store(dest, res);
@@ -108,6 +109,7 @@ impl<'w> Machine<'w> {
                             _ => bail!("expected ref")
                         }
                     },
+
                     Instruction::LoadField(dest, r#ref, field) => {
                         match self.mem.cur_frame().load(r#ref) {
                             Value::Ref(r) => self.mem.cur_frame().store(dest, r.field_value(self.world, field)?),
@@ -123,12 +125,10 @@ impl<'w> Machine<'w> {
                             _ => bail!("expected ref")
                         }
                     },
+
                     Instruction::LoadIndex(dest, r#ref, index) => {
                         let index = match self.mem.cur_frame().convert_value(index) {
-                            Value::Int(Integer::U8(x)) => x as usize,
-                            Value::Int(Integer::U16(x)) => x as usize,
-                            Value::Int(Integer::U32(x)) => x as usize,
-                            Value::Int(Integer::U64(x)) => x as usize,
+                            Value::Int(Integer { signed: false, data, .. }) => data as usize,
                             _ => bail!("invalid index")
                         };
                         match self.mem.cur_frame().load(r#ref) {
@@ -138,10 +138,7 @@ impl<'w> Machine<'w> {
                     },
                     Instruction::StoreIndex(src, r#ref, index) => {
                         let index = match self.mem.cur_frame().convert_value(index) {
-                            Value::Int(Integer::U8(x)) => x as usize,
-                            Value::Int(Integer::U16(x)) => x as usize,
-                            Value::Int(Integer::U32(x)) => x as usize,
-                            Value::Int(Integer::U64(x)) => x as usize,
+                            Value::Int(Integer { signed: false, data, .. }) => data as usize,
                             _ => bail!("invalid index")
                         };
                         match self.mem.cur_frame().load(r#ref) {
@@ -152,31 +149,7 @@ impl<'w> Machine<'w> {
                             _ => bail!("expected ref")
                         }
                     }
-                    /*Instruction::RefAt(dest, target, index) => {
-                      let index = match self.mem.cur_frame().convert_value(index) {
-                      Value::Int(Integer::U8(x)) => x as usize,
-                      Value::Int(Integer::U16(x)) => x as usize,
-                      Value::Int(Integer::U32(x)) => x as usize,
-                      Value::Int(Integer::U64(x)) => x as usize,
-                      _ => bail!("invalid index")
-                      };
-                      let target = match self.mem.cur_frame().load(target) {
-                      Value::Ref(r) => r, _ => bail!("expected ref")
-                      };
-                      let targ_type = self.mem.type_for(target);
-                      match targ_type {
-                      ir::Type::User(path, _) => {},
-                      ir::Type::Tuple(tys) => {},
-                      ir::Type::Array(el) => {
-                      let max = self.mem.element_count(target);
-                      if max < index { bail!("invalid index, greater than length"); }
-                      unsafe {
-                      self.mem.cur_frame().store(dest, Value::Ref(target.offset(index as isize)));
-                      }
-                      },
-                      _ => bail!("invalid target")
-                      }
-                      },*/
+
                     Instruction::Call(dest, fn_path, params) => {
                         let (fn_sig, fn_body) = self.world.get_function(fn_path).ok_or_else(|| anyhow!("function not found"))?;
                         let params = params.iter().map(|p| self.mem.cur_frame().convert_value(p)).collect();
@@ -201,10 +174,7 @@ impl<'w> Machine<'w> {
                     },
                     Instruction::AllocArray(dest, r#type, count) => {
                         let count = match self.mem.cur_frame().convert_value(count) {
-                            Value::Int(Integer::U8(c)) => c as usize,
-                            Value::Int(Integer::U16(c)) => c as usize,
-                            Value::Int(Integer::U32(c)) => c as usize,
-                            Value::Int(Integer::U64(c)) => c as usize,
+                            Value::Int(Integer { signed: false, data, .. }) => data as usize,
                             _ => bail!("invalid count for array alloc")
                         };
                         let nrf = self.mem.alloc_array(r#type, count)?;

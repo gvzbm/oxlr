@@ -133,7 +133,7 @@ impl World {
             Type::Bool => 1,
             Type::Int { width, .. } => *width as usize / 8,
             Type::Float { width } => *width as usize / 8,
-            Type::Ref(_) | Type::AbstractRef(_) | Type::Array(_) => std::mem::size_of::<*mut usize>(),
+            Type::Ref(_) | Type::AbstractRef(_) | Type::Array(_) => std::mem::size_of::<crate::memory::HeapRef>(),
             Type::Tuple(t) => t.iter().map(|t| self.size_of_type(t)).fold_ok(0, std::ops::Add::add)?,
             Type::User(def_path, params) => self.get_type(def_path).ok_or_else(|| anyhow!(""))
                 .and_then(|t| self.size_of_user_type(t, params))?,

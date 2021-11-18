@@ -32,8 +32,23 @@ impl HeapRef {
     }
 
     fn value_at_offset(&self, offset_in_bytes: usize, ty: &ir::Type) -> Value {
-        //self.0.offset((std::mem::size_of::<Header>() + offset_in_bytes) as isize) as *mut Value;
-        todo!()
+        unsafe {
+            let ptr = self.0.offset((std::mem::size_of::<Header>() + offset_in_bytes) as isize);
+            match ty {
+                ir::Type::Unit => Value::Nil,
+                ir::Type::Bool => Value::Bool(*ptr > 0),
+                ir::Type::Int { signed, width } => {
+                    match width {
+                        8  => Value::Int(Integer::new(8,  *signed, * ptr as u64)),
+                        16 => Value::Int(Integer::new(16, *signed, *(ptr as *mut u16) as u64)),
+                        32 => Value::Int(Integer::new(32, *signed, *(ptr as *mut u32) as u64)),
+                        64 => Value::Int(Integer::new(64, *signed, *(ptr as *mut u64))),
+                        _ => panic!()
+                    }
+                }
+                _ => todo!()
+            }
+        }
     }
 
     fn set_value_at_offset(&self, offset_in_bytes: usize, ty: &ir::Type, val: Value) {
