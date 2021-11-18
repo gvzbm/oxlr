@@ -26,18 +26,18 @@ pub enum Value {
     Nil, Bool(bool),
     Int(Integer),
     Float(Float),
-    Ref(*mut Value), Array(*mut Value), Fn
+    Ref(crate::memory::HeapRef), Array(crate::memory::HeapRef), Fn
 }
 
 impl Value {
-    pub fn type_of<'w>(&self, mem: &crate::memory::Memory<'w>) -> ir::Type<'w> {
+    pub fn type_of(&self, mem: &crate::memory::Memory) -> ir::Type {
         match self {
             Value::Nil => ir::Type::Unit,
             Value::Bool(_) => ir::Type::Bool,
             Value::Int(i) => ir::Type::Int { signed: i.signed(), width: i.width() },
             Value::Float(f) => ir::Type::Float { width: f.width() },
-            Value::Ref(v) => mem.type_for(*v),
-            Value::Array(v) => mem.type_for(*v),
+            Value::Ref(v) => v.type_of().clone(),
+            Value::Array(v) => v.type_of().clone(),
             Value::Fn => ir::Type::FnRef(todo!()),
         }
     }

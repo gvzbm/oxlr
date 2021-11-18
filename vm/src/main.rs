@@ -11,12 +11,12 @@ use value::*;
 use memory::{Memory, Frame};
 
 struct Machine<'w> {
-    world: &'w World<'w>,
+    world: &'w World,
     mem: Memory<'w>,
 }
 
 impl<'w> Machine<'w> {
-    fn new(world: &'w World<'w>) -> Machine<'w> {
+    fn new(world: &'w World) -> Machine {
         Machine {
             mem: Memory::new(world), world
         }
@@ -31,7 +31,7 @@ impl<'w> Machine<'w> {
     }
 
     /// look up and call a function by interpreting its body to determine the return value
-    fn call_fn(&mut self, body: &'w ir::FnBody<'w>, args: Vec<Value>) -> Result<Value> {
+    fn call_fn(&mut self, body: &ir::FnBody, args: Vec<Value>) -> Result<Value> {
         self.mem.stack.push(Frame::new(body.max_registers as usize));
         // let cur_frame = self.mem.stack.last_mut().unwrap();
         let mut cur_block_index = 0;
@@ -91,23 +91,39 @@ impl<'w> Machine<'w> {
                         };
                         self.mem.cur_frame().store(dest, res);
                     },
-                    Instruction::Store(dest, v) => {
+
+                    Instruction::LoadImm(dest, v) => {
                         let v = self.mem.cur_frame().convert_value(v);
                         self.mem.cur_frame().store(dest, v)
                     },
                     Instruction::LoadRef(dest, r#ref) => {
                         match self.mem.cur_frame().load(r#ref) {
-                            Value::Ref(r) => self.mem.cur_frame().store(dest, unsafe { (&*r).clone() }),
+                            Value::Ref(r) => self.mem.cur_frame().store(dest, r.value()),
                             _ => bail!("expected ref")
                         }
                     },
                     Instruction::StoreRef(dest, src) => {
                         match self.mem.cur_frame().load(dest) {
-                            Value::Ref(r) => unsafe { *r = self.mem.cur_frame().load(src) },
+                            Value::Ref(r) => unsafe { r.set_value(self.mem.cur_frame().load(src)) },
                             _ => bail!("expected ref")
                         }
                     },
-                    Instruction::RefAt(dest, target, index) => {
+                    Instruction::LoadField(dest, r#ref, field) => {
+                        match self.mem.cur_frame().load(r#ref) {
+                            Value::Ref(r) => self.mem.cur_frame().store(dest, r.field_value(self.world, field)?),
+                            _ => bail!("expected ref")
+                        }
+                    },
+                    Instruction::StoreField(src, r#ref, field) => {
+                        match self.mem.cur_frame().load(r#ref) {
+                            Value::Ref(r) => {
+                                let val = self.mem.cur_frame().load(src);
+                                r.set_field_value(self.world, field, val)?
+                            },
+                            _ => bail!("expected ref")
+                        }
+                    },
+                    Instruction::LoadIndex(dest, r#ref, index) => {
                         let index = match self.mem.cur_frame().convert_value(index) {
                             Value::Int(Integer::U8(x)) => x as usize,
                             Value::Int(Integer::U16(x)) => x as usize,
@@ -115,23 +131,52 @@ impl<'w> Machine<'w> {
                             Value::Int(Integer::U64(x)) => x as usize,
                             _ => bail!("invalid index")
                         };
-                        let target = match self.mem.cur_frame().load(target) {
-                            Value::Ref(r) => r, _ => bail!("expected ref")
-                        };
-                        let targ_type = self.mem.type_for(target);
-                        match targ_type {
-                            ir::Type::User(path, _) => {},
-                            ir::Type::Tuple(tys) => {},
-                            ir::Type::Array(el) => {
-                                let max = self.mem.element_count(target);
-                                if max < index { bail!("invalid index, greater than length"); }
-                                unsafe {
-                                    self.mem.cur_frame().store(dest, Value::Ref(target.offset(index as isize)));
-                                }
-                            },
-                            _ => bail!("invalid target")
+                        match self.mem.cur_frame().load(r#ref) {
+                            Value::Ref(r) => self.mem.cur_frame().store(dest, r.indexed_value(self.world, index)?),
+                            _ => bail!("expected ref")
                         }
                     },
+                    Instruction::StoreIndex(src, r#ref, index) => {
+                        let index = match self.mem.cur_frame().convert_value(index) {
+                            Value::Int(Integer::U8(x)) => x as usize,
+                            Value::Int(Integer::U16(x)) => x as usize,
+                            Value::Int(Integer::U32(x)) => x as usize,
+                            Value::Int(Integer::U64(x)) => x as usize,
+                            _ => bail!("invalid index")
+                        };
+                        match self.mem.cur_frame().load(r#ref) {
+                            Value::Ref(r) => {
+                                let val = self.mem.cur_frame().load(src);
+                                r.set_indexed_value(self.world, index, val)?
+                            },
+                            _ => bail!("expected ref")
+                        }
+                    }
+                    /*Instruction::RefAt(dest, target, index) => {
+                      let index = match self.mem.cur_frame().convert_value(index) {
+                      Value::Int(Integer::U8(x)) => x as usize,
+                      Value::Int(Integer::U16(x)) => x as usize,
+                      Value::Int(Integer::U32(x)) => x as usize,
+                      Value::Int(Integer::U64(x)) => x as usize,
+                      _ => bail!("invalid index")
+                      };
+                      let target = match self.mem.cur_frame().load(target) {
+                      Value::Ref(r) => r, _ => bail!("expected ref")
+                      };
+                      let targ_type = self.mem.type_for(target);
+                      match targ_type {
+                      ir::Type::User(path, _) => {},
+                      ir::Type::Tuple(tys) => {},
+                      ir::Type::Array(el) => {
+                      let max = self.mem.element_count(target);
+                      if max < index { bail!("invalid index, greater than length"); }
+                      unsafe {
+                      self.mem.cur_frame().store(dest, Value::Ref(target.offset(index as isize)));
+                      }
+                      },
+                      _ => bail!("invalid target")
+                      }
+                      },*/
                     Instruction::Call(dest, fn_path, params) => {
                         let (fn_sig, fn_body) = self.world.get_function(fn_path).ok_or_else(|| anyhow!("function not found"))?;
                         let params = params.iter().map(|p| self.mem.cur_frame().convert_value(p)).collect();

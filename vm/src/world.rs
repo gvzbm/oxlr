@@ -2,11 +2,11 @@ use std::{collections::HashMap};
 use itertools::Itertools;
 use anyhow::*;
 
-pub struct World<'m> {
+pub struct World {
     global_module_path: std::path::PathBuf,
     local_module_path: std::path::PathBuf,
-    modules: HashMap<ir::Path<'m>, ir::Module<'m>>,
-    instantiated_types: HashMap<(ir::Path<'m>, Vec<ir::Type<'m>>), ir::TypeDefinition<'m>>
+    modules: HashMap<ir::Path, ir::Module>,
+    instantiated_types: HashMap<(ir::Path, Vec<ir::Type>), ir::TypeDefinition>
 }
 
 fn test_module_file_candidate(dir_entry: &std::fs::DirEntry, path: &ir::Path, version_req: &ir::VersionReq) -> Option<std::path::PathBuf> {
@@ -24,8 +24,8 @@ fn test_module_file_candidate(dir_entry: &std::fs::DirEntry, path: &ir::Path, ve
     }
 }
 
-impl<'m> World<'m> {
-    pub fn new() -> Result<World<'m>> {
+impl World {
+    pub fn new() -> Result<World> {
         Ok(World {
             global_module_path: std::env::var("OXLR_MODULE_PATH").map(std::path::PathBuf::from)?,
             local_module_path: std::env::current_dir()?,
@@ -35,7 +35,7 @@ impl<'m> World<'m> {
     }
 
     /// get a module, loading it from the filesystem if necessary by searching the module search paths
-    pub fn load_module<'s>(&mut self, path: &'s ir::Path<'m>, version: &ir::VersionReq) -> Result<()> {
+    pub fn load_module<'s>(&mut self, path: &'s ir::Path, version: &ir::VersionReq) -> Result<()> {
         assert!(path.len() > 0);
         if let Some(m) = self.modules.get(path) {
             if version.matches(&m.version) {
@@ -75,30 +75,30 @@ impl<'m> World<'m> {
         }
     }
 
-    pub fn get_module(&self, path: &ir::Path<'m>) -> Option<&ir::Module> {
+    pub fn get_module(&self, path: &ir::Path) -> Option<&ir::Module> {
         self.modules.get(path)
     }
 
     /// look up a type definition by path
-    pub fn get_type(&self, path: &'m ir::Path<'m>) -> Option<&'m ir::TypeDefinition> {
+    pub fn get_type(&self, path: &ir::Path) -> Option<&ir::TypeDefinition> {
         let m = self.get_module(&path.subpath(1))?;
         m.types.get(path.last())
     }
 
     /// look up an interface by path
-    pub fn get_interface(&self, path: &'m ir::Path) -> Option<&'m ir::Interface> {
+    pub fn get_interface(&self, path: &ir::Path) -> Option<&ir::Interface> {
         let m = self.get_module(&path.subpath(1))?;
         m.interfaces.get(path.last())
     }
 
     /// look up a function by path
-    pub fn get_function(&self, path: &'m ir::Path) -> Option<&'m (ir::FunctionSignature, ir::FnBody)> {
+    pub fn get_function(&self, path: &ir::Path) -> Option<&(ir::FunctionSignature, ir::FnBody)> {
         let m = self.get_module(&path.subpath(1))?;
         m.functions.get(path.last())
     }
 
     /// look up the implementation function specific to type `ty` for the interface function `interface_fn`
-    pub fn find_impl(&self, interface_fn: &'m ir::Path<'m>, ty: &ir::Type) -> Option<&'m (ir::FunctionSignature, ir::FnBody)> {
+    pub fn find_impl(&self, interface_fn: &ir::Path, ty: &ir::Type) -> Option<&(ir::FunctionSignature, ir::FnBody)> {
         let if_path = interface_fn.subpath(1);
         let fn_name = interface_fn.last();
         let m = self.get_module(&interface_fn.subpath(2))?;
@@ -107,10 +107,11 @@ impl<'m> World<'m> {
         m.functions.get(fn_sym)
     }
 
-    pub fn size_of_user_type(&self, td: &ir::TypeDefinition<'m>, params: &Option<Vec<ir::Type<'m>>>) -> Result<usize> {
+    pub fn size_of_user_type(&self, td: &ir::TypeDefinition, params: &Option<Vec<ir::Type>>) -> Result<usize> {
         if let Some(_) = params {
             todo!("compute the size of a specialized generic type");
         } else {
+            // TODO: deal with padding
             match td {
                 ir::TypeDefinition::Sum { variants, .. } => {
                     variants.iter().map(|(_, td)| self.size_of_user_type(td, &None))

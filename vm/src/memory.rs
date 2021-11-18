@@ -2,19 +2,112 @@ use crate::world::*;
 use crate::value::*;
 use std::{cell::RefCell, collections::HashMap, rc::Rc, borrow::Cow, alloc::Layout, mem::size_of, ptr::null_mut};
 use anyhow::*;
+use itertools::Itertools;
 
-struct Header<'m> {
-    ty: Box<ir::Type<'m>>,
+struct Header {
+    ty: Box<ir::Type>, // this could probably be a &'m instead
     elements: usize,
-    prev: *mut Header<'m>
+    prev: *mut Header
 }
 
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct HeapRef(*mut u8);
+
 pub struct Memory<'w> {
-    world: &'w World<'w>,
-    last_alloc: *mut Header<'w>,
+    world: &'w World,
+    last_alloc: *mut Header,
     max_size: usize, current_size: usize,
 
     pub stack: Vec<Frame>
+}
+
+impl HeapRef {
+    pub fn type_of(&self) -> &ir::Type {
+        unsafe { &(*(self.0 as *mut Header)).ty }
+    }
+
+    pub fn element_count(&self) -> usize {
+        unsafe { (*(self.0 as *mut Header)).elements }
+    }
+
+    fn value_at_offset(&self, offset_in_bytes: usize, ty: &ir::Type) -> Value {
+        //self.0.offset((std::mem::size_of::<Header>() + offset_in_bytes) as isize) as *mut Value;
+        todo!()
+    }
+
+    fn set_value_at_offset(&self, offset_in_bytes: usize, ty: &ir::Type, val: Value) {
+        //self.0.offset((std::mem::size_of::<Header>() + offset_in_bytes) as isize) as *mut Value;
+        todo!()
+    }
+
+
+    pub fn value(&self) -> Value { self.value_at_offset(0, self.type_of()) }
+    pub fn set_value(&self, val: Value) { self.set_value_at_offset(0, self.type_of(), val) }
+
+    fn indexed_offset(&self, world: &World, index: usize) -> Result<(usize, &ir::Type)> {
+        match self.type_of() {
+            ir::Type::Array(el_ty) => Ok((index * world.size_of_type(el_ty)?, el_ty)) ,
+            ir::Type::Tuple(ts) => {
+                let mut offset = 0;
+                for t in ts.iter().take(index) {
+                    offset += world.size_of_type(t)?;
+                }
+                Ok((offset, &ts[index]))
+            },
+            _ => Err(anyhow!("cannot index into unindexed type"))
+        }
+    }
+
+    pub fn indexed_value(&self, world: &World, index: usize) -> Result<Value> {
+        let (offset, ty) = self.indexed_offset(world, index)?;
+        Ok(self.value_at_offset(offset, ty))
+    }
+
+    pub fn set_indexed_value(&self, world: &World, index: usize, val: Value) -> Result<()> {
+        let (offset, ty) = self.indexed_offset(world, index)?;
+        Ok(self.set_value_at_offset(offset, ty, val))
+    }
+
+    fn field_offset<'w>(&self, world: &'w World, field: &ir::Symbol) -> Result<(usize, &'w ir::Type)> {
+        match self.type_of() {
+            ir::Type::User(path, None) => {
+                match world.get_type(path) {
+                    Some(ir::TypeDefinition::NewType(ty)) => {
+                        Ok((0, ty)) // should probably check what the field name is?
+                    },
+                    Some(ir::TypeDefinition::Sum { .. }) => {
+                        Err(anyhow!("invalid type for field lookup"))
+                    },
+                    Some(ir::TypeDefinition::Product { fields, .. }) => {
+                        if let Some((_, ty)) = fields.iter().find(|(n, _)| n == field) {
+                            let mut offset = 0;
+                            for (_,t) in fields.iter().take_while(|(n,_)| n != field) {
+                                offset += world.size_of_type(t)?;
+                                //TODO: deal with field padding
+                            }
+                            Ok((offset, ty))
+                        } else {
+                            Err(anyhow!("field not defined on type"))
+                        }
+                    },
+                    None => Err(anyhow!("unknown type")),
+                }
+            },
+            ir::Type::User(path, Some(params)) => todo!(),
+            _ => Err(anyhow!("invalid type for field lookup"))
+        }
+    }
+
+    pub fn field_value(&self, world: &World, field: &ir::Symbol) -> Result<Value> {
+        let (offset, ty) = self.field_offset(world, field)?;
+        Ok(self.value_at_offset(offset, ty))
+    }
+
+    pub fn set_field_value(&self, world: &World, field: &ir::Symbol, val: Value) -> Result<()> {
+        let (offset, ty) = self.field_offset(world, field)?;
+        Ok(self.set_value_at_offset(offset, ty, val))
+    }
 }
 
 //TODO: it is most likely going to be the most convenient to control the layout of memory in the
@@ -24,7 +117,7 @@ pub struct Memory<'w> {
 //calculate the byte offset and convert the bytes into a value
 
 impl<'w> Memory<'w> {
-    pub fn new(world:&'w World<'w>) -> Memory<'w> {
+    pub fn new(world: &'w World) -> Memory {
         Memory {
             world, last_alloc: null_mut(),
             max_size: 4 * 1024 * 1024 * 1024, // 4GiB
@@ -34,14 +127,14 @@ impl<'w> Memory<'w> {
     }
 
     /// allocate a new value on the heap, and return a reference value
-    pub fn alloc(&mut self, ty: &ir::Type<'w>) -> Result<Value> {
+    pub fn alloc(&mut self, ty: &ir::Type) -> Result<Value> {
         if let ir::Type::Array(_) = ty {
             bail!("use alloc_array to allocate arrays");
         }
 
         let mut ran_gc = false;
         loop {
-            let layout = Layout::from_size_align(size_of::<Header>() + size_of::<Value>(), 8)?;
+            let layout = Layout::from_size_align(size_of::<Header>() + self.world.size_of_type(ty)?, 8)?;
             unsafe {
                 if self.current_size + layout.size() > self.max_size {
                     if ran_gc {
@@ -63,15 +156,15 @@ impl<'w> Memory<'w> {
                 self.last_alloc = mem;
                 self.current_size += layout.size();
                 // should this be aligned?
-                return Ok(Value::Ref(mem.offset(1) as *mut Value));
+                return Ok(Value::Ref(HeapRef(mem.offset(1) as *mut u8)));
             }
         }
     }
 
-    pub fn alloc_array(&mut self, el_ty: &ir::Type<'w>, count: usize) -> Result<Value> {
+    pub fn alloc_array(&mut self, el_ty: &ir::Type, count: usize) -> Result<Value> {
         let mut ran_gc = false;
         loop {
-            let layout = Layout::from_size_align(size_of::<Header>() + size_of::<Value>()*count, 8)?;
+            let layout = Layout::from_size_align(size_of::<Header>() + self.world.size_of_type(el_ty)?*count, 8)?;
             unsafe {
                 if self.current_size + layout.size() > self.max_size {
                     if ran_gc {
@@ -93,12 +186,12 @@ impl<'w> Memory<'w> {
                 self.last_alloc = mem;
                 self.current_size += layout.size();
                 // should this be aligned?
-                return Ok(Value::Array(mem.offset(1) as *mut Value));
+                return Ok(Value::Array(HeapRef(mem.offset(1) as *mut u8)));
             }
         }
     }
 
-    pub fn type_for(&self, rf: *mut Value) -> ir::Type<'w> {
+    pub fn type_for(&self, rf: *mut Value) -> ir::Type {
         let header = unsafe {&*((rf as *mut u8).offset(-(size_of::<Header>() as isize)) as *mut Header)};
         *(header.ty.clone())
     }
@@ -112,7 +205,7 @@ impl<'w> Memory<'w> {
     pub fn box_value(&mut self, val: Value) -> Result<Value> {
         match self.alloc(&val.type_of(self))? {
             Value::Ref(r) => {
-                unsafe { *r = val; }
+                r.set_value(val);
                 Ok(Value::Ref(r))
             }
             _ => unreachable!()
