@@ -33,7 +33,9 @@ impl<'w> Machine<'w> {
     /// look up and call a function by interpreting its body to determine the return value
     fn call_fn(&mut self, body: &ir::FnBody, args: Vec<Value>) -> Result<Value> {
         self.mem.stack.push(Frame::new(body.max_registers as usize));
-        // let cur_frame = self.mem.stack.last_mut().unwrap();
+        for (i, v) in args.into_iter().enumerate() {
+            self.mem.cur_frame().store(&ir::code::Register(i as u32), v);
+        }
         let mut cur_block_index = 0;
         let mut prev_block_index: Option<usize> = Some(0);
         'blocks: loop {
@@ -164,8 +166,7 @@ impl<'w> Machine<'w> {
                         let result = self.call_fn(fn_body, params)?;
                         self.mem.cur_frame().store(dest, result)
                     },
-                    Instruction::Return(Some(v)) => return Ok(self.mem.cur_frame().convert_value(v)),
-                    Instruction::Return(None) => return Ok(Value::Nil), // this might cause troubles
+                    Instruction::Return(v) => return Ok(self.mem.cur_frame().convert_value(v)),
                     Instruction::RefFunc(dest, _) => todo!(),
                     Instruction::UnwrapVariant(dest, _, _, _) => todo!(),
                     Instruction::Alloc(dest, r#type) => {

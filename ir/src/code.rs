@@ -55,7 +55,7 @@ pub enum Instruction {
     Call(Register, Path, Vec<Value>),
     /// (path to interface function, parameters) the first parameter's type will be used to find the implementation
     CallImpl(Register, Path, Vec<Value>),
-    Return(Option<Value>),
+    Return(Value),
 
     /// create a function pointer
     RefFunc(Register, Path),

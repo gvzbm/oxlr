@@ -10,7 +10,6 @@ struct Header {
     prev: *mut Header
 }
 
-
 #[derive(Clone, Debug, PartialEq)]
 pub struct HeapRef(*mut u8);
 
@@ -45,15 +44,46 @@ impl HeapRef {
                         64 => Value::Int(Integer::new(64, *signed, *(ptr as *mut u64))),
                         _ => panic!()
                     }
-                }
+                },
+                // TODO: this is quite unsafe, really we should have some way to validate that this
+                // is a valid pointer. Perhaps though since this is a private interface it's fine.
+                ir::Type::Array(_) => Value::Array(HeapRef(*(ptr as *mut *mut u8))),
+                ir::Type::Ref(_) | ir::Type::AbstractRef(_) 
+                    => Value::Ref(HeapRef(*(ptr as *mut *mut u8))),
                 _ => todo!()
             }
         }
     }
 
+    // `ty` is the type of the thing that is already there
     fn set_value_at_offset(&self, offset_in_bytes: usize, ty: &ir::Type, val: Value) {
-        //self.0.offset((std::mem::size_of::<Header>() + offset_in_bytes) as isize) as *mut Value;
-        todo!()
+        unsafe {
+            let ptr = self.0.offset((std::mem::size_of::<Header>() + offset_in_bytes) as isize);
+            match (ty, val) {
+                (ir::Type::Bool, Value::Bool(b)) => {
+                    *ptr = if b { 1 } else { 0 };
+                },
+                (ir::Type::Int { signed: tsig, width: twid },
+                    Value::Int(Integer { signed, width, data })) if signed == *tsig && width <= *twid => {
+                    match twid {
+                        8 => *ptr = data as u8,
+                        16 => *(ptr as *mut u16) = data as u16,
+                        32 => *(ptr as *mut u32) = data as u32,
+                        64 => *(ptr as *mut u64) = data,
+                        _ => panic!()
+                    }
+                },
+                (ir::Type::Array(_), Value::Array(r)) => {
+                    // should we validate the element type here?
+                    *(ptr as *mut *mut u8) = r.0;
+                }
+                (ir::Type::Ref(_) | ir::Type::AbstractRef(_), Value::Ref(r)) => {
+                    // should we validate the type here?
+                    *(ptr as *mut *mut u8) = r.0;
+                }
+                _ => todo!()
+            }
+        }
     }
 
 
@@ -66,6 +96,8 @@ impl HeapRef {
             ir::Type::Tuple(ts) => {
                 let mut offset = 0;
                 for t in ts.iter().take(index) {
+                    let ralign = world.required_alignment(t)?;
+                    while offset % ralign != 0 { offset += 1; }
                     offset += world.size_of_type(t)?;
                 }
                 Ok((offset, &ts[index]))
@@ -98,8 +130,9 @@ impl HeapRef {
                         if let Some((_, ty)) = fields.iter().find(|(n, _)| n == field) {
                             let mut offset = 0;
                             for (_,t) in fields.iter().take_while(|(n,_)| n != field) {
+                                let ralign = world.required_alignment(ty)?;
+                                while offset % ralign != 0 { offset += 1; }
                                 offset += world.size_of_type(t)?;
-                                //TODO: deal with field padding
                             }
                             Ok((offset, ty))
                         } else {
@@ -149,7 +182,8 @@ impl<'w> Memory<'w> {
 
         let mut ran_gc = false;
         loop {
-            let layout = Layout::from_size_align(size_of::<Header>() + self.world.size_of_type(ty)?, 8)?;
+            let layout = Layout::from_size_align(size_of::<Header>() + self.world.size_of_type(ty)?, 
+                std::mem::align_of::<Header>())?;
             unsafe {
                 if self.current_size + layout.size() > self.max_size {
                     if ran_gc {
@@ -170,7 +204,8 @@ impl<'w> Memory<'w> {
                 (&mut *mem).prev = self.last_alloc;
                 self.last_alloc = mem;
                 self.current_size += layout.size();
-                // should this be aligned?
+                // should this be aligned? how do we know how much padding to allocate until after
+                // we get the pointer?
                 return Ok(Value::Ref(HeapRef(mem.offset(1) as *mut u8)));
             }
         }
@@ -179,7 +214,8 @@ impl<'w> Memory<'w> {
     pub fn alloc_array(&mut self, el_ty: &ir::Type, count: usize) -> Result<Value> {
         let mut ran_gc = false;
         loop {
-            let layout = Layout::from_size_align(size_of::<Header>() + self.world.size_of_type(el_ty)?*count, 8)?;
+            let layout = Layout::from_size_align(size_of::<Header>() + self.world.size_of_type(el_ty)?*count, 
+                std::mem::align_of::<Header>())?;
             unsafe {
                 if self.current_size + layout.size() > self.max_size {
                     if ran_gc {
