@@ -295,10 +295,10 @@ impl Frame {
 
     pub fn convert_value(&self, val: &ir::code::Value) -> Value {
         match val {
-            ir::code::Value::LiteralInt(_) => todo!(),
+            ir::code::Value::LiteralInt(d) => Value::Int(Integer::unsigned(64, *d as u64)),
             ir::code::Value::LiteralFloat(_) => todo!(),
             ir::code::Value::LiteralString(_) => todo!(),
-            ir::code::Value::Reg(_) => todo!(),
+            ir::code::Value::Reg(r) => self.registers[r.0 as usize].clone(),
         }
     }
 }

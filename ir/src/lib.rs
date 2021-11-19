@@ -11,6 +11,7 @@ pub struct Symbol(pub String);
 /// A full path of module, submodules and optionally final name of a type/interface/function, based
 /// on context
 #[derive(Serialize, Deserialize, Debug, Hash, Eq, PartialEq, Clone)]
+//#[serde(from ="String")]
 pub struct Path(pub Vec<Symbol>);
 
 #[derive(Serialize, Deserialize, Debug, Hash, Eq, PartialEq, Clone)]

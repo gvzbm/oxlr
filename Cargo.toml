@@ -1,2 +1,2 @@
 [workspace]
-members = [ "ir", "parser", "vm" ]
+members = [ "ir", "parser", "vm", "asm" ]

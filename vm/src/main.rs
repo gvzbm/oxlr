@@ -23,11 +23,12 @@ impl<'w> Machine<'w> {
     }
 
     /// start the virtual machine
-    fn start(&mut self) {
-         let start_sym = &"start".into();
-         let (_, body) = self.world.get_function(&start_sym)
+    fn start(&mut self, mut starting_module_path: ir::Path) {
+         starting_module_path.0.push(ir::Symbol("start".into()));
+         let (_, body) = self.world.get_function(&starting_module_path)
              .expect("a start function is present");
-         let _ = self.call_fn(body, vec![]).unwrap();
+         let rv = self.call_fn(body, vec![]).unwrap();
+         log::info!("start returned: {:?}", rv);
     }
 
     /// look up and call a function by interpreting its body to determine the return value
@@ -41,6 +42,7 @@ impl<'w> Machine<'w> {
         'blocks: loop {
             let cur_block = &body.blocks[cur_block_index];
             for instr in cur_block.instrs.iter() {
+                log::trace!("running instruction {:?}", instr);
                 use ir::code::Instruction;
                 match instr {
                     Instruction::Phi(dest, precedents) => {
@@ -192,6 +194,7 @@ impl<'w> Machine<'w> {
 
 fn main() {
     env_logger::init();
+    log::info!("starting");
     let start_mod_path = std::env::args().nth(1).map(ir::Path::from).expect("module path command line argument");
     let start_mod_version = std::env::args().nth(2)
         .map(|vr| ir::VersionReq::parse(&vr).expect("parse starting module version req"))
@@ -199,5 +202,5 @@ fn main() {
     let mut world = World::new().expect("initialize world");
     world.load_module(&start_mod_path, &start_mod_version).expect("load starting module");
     let mut m = Machine::new(&world);
-    m.start();
+    m.start(start_mod_path);
 }

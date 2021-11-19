@@ -11,8 +11,8 @@ pub struct World {
 
 fn test_module_file_candidate(dir_entry: &std::fs::DirEntry, path: &ir::Path, version_req: &ir::VersionReq) -> Option<std::path::PathBuf> {
     let filename = dir_entry.file_name().into_string().ok()?;
-    let (fpath, fver) = filename.split_once('_')?;
     log::trace!("testing {} as candidate for module", dir_entry.path().display());
+    let (fpath, fver) = filename.split_once('_')?;
     let fpath = ir::Path::from(fpath);
     let fver = ir::Version::parse(fver).ok()?;
     log::trace!("candidate yielded: {} {}", fpath, fver);
