@@ -24,11 +24,12 @@ impl<'w> Machine<'w> {
 
     /// start the virtual machine
     fn start(&mut self, mut starting_module_path: ir::Path) {
-         starting_module_path.0.push(ir::Symbol("start".into()));
-         let (_, body) = self.world.get_function(&starting_module_path)
-             .expect("a start function is present");
-         let rv = self.call_fn(body, vec![]).unwrap();
-         println!("{} returned: {:?}", starting_module_path, rv);
+        starting_module_path.0.push(ir::Symbol("start".into()));
+        let (_, body) = self.world.get_function(&starting_module_path)
+            .expect("a start function is present");
+        log::trace!("starting execution");
+        let rv = self.call_fn(body, vec![]).unwrap();
+        println!("{} returned: {:?}", starting_module_path, rv);
     }
 
     /// look up and call a function by interpreting its body to determine the return value
@@ -42,7 +43,8 @@ impl<'w> Machine<'w> {
         'blocks: loop {
             let cur_block = &body.blocks[cur_block_index];
             for instr in cur_block.instrs.iter() {
-                log::trace!("running instruction {:?}", instr);
+                log::debug!("running instruction {:?}", instr);
+                log::debug!("current frame {:?}", self.mem.cur_frame());
                 use ir::code::Instruction;
                 match instr {
                     Instruction::Phi(dest, precedents) => {
@@ -72,7 +74,15 @@ impl<'w> Machine<'w> {
                         let rhs = self.mem.cur_frame().convert_value(rhs);
                         let res = match (op, lhs, rhs) {
                             (BinOp::Add, Value::Int(a), Value::Int(b)) => Value::Int(a+b),
-                            (BinOp::Sub, Value::Int(a), Value::Int(b)) => Value::Int(a-b),
+                            (BinOp::Sub, Value::Int(a), Value::Int(b)) => {
+                                // do a saturating subtraction for now
+                                // TODO: deal with overflow
+                                if a.data < b.data {
+                                    Value::Int(Integer::new(a.width, a.signed, 0))
+                                } else {
+                                    Value::Int(a-b)
+                                }
+                            },
                             (BinOp::Mul, Value::Int(a), Value::Int(b)) => Value::Int(a*b),
                             (BinOp::Div, Value::Int(a), Value::Int(b)) => Value::Int(a/b),
                             (BinOp::Eq,  a, b) => Value::Bool(a == b),
@@ -81,7 +91,7 @@ impl<'w> Machine<'w> {
                             //the operation also needs to be added to the corrosponding value as
                             //well (Integer/Float). Additionally, invalid/mismatched types should
                             //result in an actual error rather than panicking.
-                            _ => todo!()
+                            (op, lhs, rhs) => todo!("unimplemented binary operator {:?} ({:?}) {:?}", lhs, op, rhs)
                         };
                         self.mem.cur_frame().store(dest, res);
                     },
@@ -155,12 +165,16 @@ impl<'w> Machine<'w> {
                     }
 
                     Instruction::Call(dest, fn_path, params) => {
+                        log::trace!("calling {}", fn_path);
+                        // TODO: Check types to make sure call is valid!
                         let (fn_sig, fn_body) = self.world.get_function(fn_path).ok_or_else(|| anyhow!("function not found"))?;
                         let params = params.iter().map(|p| self.mem.cur_frame().convert_value(p)).collect();
                         let result = self.call_fn(fn_body, params)?;
                         self.mem.cur_frame().store(dest, result)
                     },
                     Instruction::CallImpl(dest, fn_path, params) => {
+                        log::trace!("calling {}", fn_path);
+                        // TODO: Check types to make sure call is valid!
                         let params: Vec<Value> = params.iter().map(|p| self.mem.cur_frame().convert_value(p)).collect();
                         let self_val = params.first().ok_or_else(|| anyhow!("call impl requires at least one parameter"))?;
                         let (fn_sig, fn_body) = self.world.find_impl(fn_path, &self_val.type_of(&self.mem))
@@ -168,7 +182,10 @@ impl<'w> Machine<'w> {
                         let result = self.call_fn(fn_body, params)?;
                         self.mem.cur_frame().store(dest, result)
                     },
-                    Instruction::Return(v) => return Ok(self.mem.cur_frame().convert_value(v)),
+                    Instruction::Return(v) => {
+                        log::trace!("return");
+                        return Ok(self.mem.cur_frame().convert_value(v))
+                    },
                     Instruction::RefFunc(dest, _) => todo!(),
                     Instruction::UnwrapVariant(dest, _, _, _) => todo!(),
                     Instruction::Alloc(dest, r#type) => {

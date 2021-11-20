@@ -14,5 +14,5 @@ echo
 echo "==== Running test modules ======="
 export OXLR_MODULE_PATH=/tmp/oxlr_test_modules
 export RUST_LOG=info
-find -type f -name "*.s" -printf "%f" | cut -d '.' -f -1 \
-    | xargs -- $VM | grep -v 0
+find -type f -name "*.s" -printf "%f\n" | cut -d '.' -f -1 \
+    | xargs -n 1 -- $VM

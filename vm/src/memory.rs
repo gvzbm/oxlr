@@ -274,6 +274,7 @@ impl<'w> Memory<'w> {
     }
 }
 
+#[derive(Debug)]
 pub struct Frame {
     pub registers: Vec<Value>
 }
