@@ -28,7 +28,7 @@ impl<'w> Machine<'w> {
          let (_, body) = self.world.get_function(&starting_module_path)
              .expect("a start function is present");
          let rv = self.call_fn(body, vec![]).unwrap();
-         log::info!("start returned: {:?}", rv);
+         println!("{} returned: {:?}", starting_module_path, rv);
     }
 
     /// look up and call a function by interpreting its body to determine the return value
@@ -109,7 +109,7 @@ impl<'w> Machine<'w> {
                     },
                     Instruction::StoreRef(dest, src) => {
                         match self.mem.cur_frame().load(dest) {
-                            Value::Ref(r) => unsafe { r.set_value(self.mem.cur_frame().load(src)) },
+                            Value::Ref(r) => r.set_value(self.mem.cur_frame().load(src)),
                             _ => bail!("expected ref")
                         }
                     },
@@ -194,7 +194,6 @@ impl<'w> Machine<'w> {
 
 fn main() {
     env_logger::init();
-    log::info!("starting");
     let start_mod_path = std::env::args().nth(1).map(ir::Path::from).expect("module path command line argument");
     let start_mod_version = std::env::args().nth(2)
         .map(|vr| ir::VersionReq::parse(&vr).expect("parse starting module version req"))

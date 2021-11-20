@@ -10,9 +10,14 @@ pub struct World {
 }
 
 fn test_module_file_candidate(dir_entry: &std::fs::DirEntry, path: &ir::Path, version_req: &ir::VersionReq) -> Option<std::path::PathBuf> {
-    let filename = dir_entry.file_name().into_string().ok()?;
+    let mut filename = dir_entry.file_name().into_string().ok()?;
+    if !filename.ends_with(".om") {
+        return None;
+    } else {
+        filename.truncate(filename.len() - 3)
+    }
     log::trace!("testing {} as candidate for module", dir_entry.path().display());
-    let (fpath, fver) = filename.split_once('_')?;
+    let (fpath, fver) = filename.split_once('#')?;
     let fpath = ir::Path::from(fpath);
     let fver = ir::Version::parse(fver).ok()?;
     log::trace!("candidate yielded: {} {}", fpath, fver);
