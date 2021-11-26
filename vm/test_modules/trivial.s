@@ -6,13 +6,13 @@ Module(
     implementations: {},
     functions: {
         Symbol("start"): (
-            FunctionSignature(args: [], return_type: Int(width: 32, signed: true)),
+            FunctionSignature(args: [], return_type: Int(width: 64, signed: false)),
             FnBody(
                 max_registers: 1,
                 blocks: [
                     BasicBlock(
                         instrs: [
-                            Return(LiteralInt(0))
+                            Return(LiteralInt(Integer(width: 64, signed: false, data: 0)))
                         ],
                         next_block: 0
                     )

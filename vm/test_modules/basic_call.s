@@ -29,14 +29,16 @@ Module(
             )
         ),
         Symbol("start"): (
-            FunctionSignature(args: [], return_type: Int(width: 32, signed: true)),
+            FunctionSignature(args: [], return_type: Int(width: 64, signed: false)),
             FnBody(
                 max_registers: 1,
                 blocks: [
                     BasicBlock(
                         instrs: [
                             Call(Register(0), Path([Symbol("basic_call"), Symbol("muladd")]),
-                                [ LiteralInt(3), LiteralInt(5), LiteralInt(0) ]),
+                                [ LiteralInt(Integer(width: 32, signed: true, data: 3)),
+                                LiteralInt(Integer(width: 32, signed: true, data: 5)),
+                                LiteralInt(Integer(width: 32, signed: true, data: 0)) ]),
                             Return(Reg(Register(0)))
                         ],
                         next_block: 0

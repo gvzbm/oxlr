@@ -5,6 +5,9 @@ pub use semver::{Version, VersionReq};
 pub mod code;
 pub use code::FnBody;
 
+pub mod numbers;
+pub use numbers::*;
+
 #[derive(Serialize, Deserialize, Debug, Hash, Eq, PartialEq, Clone)]
 pub struct Symbol(pub String);
 

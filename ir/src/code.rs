@@ -1,7 +1,7 @@
 use std::borrow::Cow;
 
 use serde::{Serialize, Deserialize};
-use super::{Symbol, Path, Type};
+use super::{Symbol, Path, Type, numbers::Integer, numbers::Float};
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct Register(pub u32);
@@ -10,8 +10,8 @@ pub type BlockIndex = usize;
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub enum Value {
-    LiteralInt(usize),
-    LiteralFloat(f64),
+    LiteralInt(Integer),
+    LiteralFloat(Float),
     LiteralString(String),
     Reg(Register)
 }
