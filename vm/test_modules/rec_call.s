@@ -12,6 +12,7 @@ Module(
                 ],
                 return_type: Int(width: 32, signed: true)
             ),
+            // this code is sloppy and actually computes fib(n+2), oh well
             FnBody(
                 max_registers: 7,
                 blocks: [
@@ -25,7 +26,7 @@ Module(
 
                     BasicBlock(
                         instrs: [
-                            Return(LiteralInt(0))
+                            Return(LiteralInt(1))
                         ],
                         next_block: 999
                     ),
@@ -47,12 +48,13 @@ Module(
         Symbol("start"): (
             FunctionSignature(args: [], return_type: Int(width: 32, signed: true)),
             FnBody(
-                max_registers: 1,
+                max_registers: 2,
                 blocks: [
                     BasicBlock(
                         instrs: [
-                            Call(Register(0), Path([Symbol("rec_call"), Symbol("fib")]), [ LiteralInt(1) ]),
-                            Return(Reg(Register(0)))
+                            Call(Register(0), Path([Symbol("rec_call"), Symbol("fib")]), [ LiteralInt(10) ]),
+                            BinaryOp(Sub, Register(1), LiteralInt(144), Reg(Register(0))),
+                            Return(Reg(Register(1)))
                         ],
                         next_block: 0
                     )

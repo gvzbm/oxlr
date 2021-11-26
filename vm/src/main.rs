@@ -184,7 +184,9 @@ impl<'w> Machine<'w> {
                     },
                     Instruction::Return(v) => {
                         log::trace!("return");
-                        return Ok(self.mem.cur_frame().convert_value(v))
+                        let rv = self.mem.cur_frame().convert_value(v);
+                        self.mem.stack.pop();
+                        return Ok(rv)
                     },
                     Instruction::RefFunc(dest, _) => todo!(),
                     Instruction::UnwrapVariant(dest, _, _, _) => todo!(),
