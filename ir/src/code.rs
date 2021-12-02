@@ -10,6 +10,7 @@ pub type BlockIndex = usize;
 
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub enum Value {
+    LiteralUnit,
     LiteralInt(Integer),
     LiteralFloat(Float),
     LiteralString(String),
@@ -38,9 +39,11 @@ pub enum Instruction {
     LoadImm(Register, Value),
 
     /// Get the value behind a reference
+    /// (Register to put value in, Reference to load from)
     LoadRef(Register, Register),
     /// Move a value into a reference
-    StoreRef(Register, Register),
+    /// (Reference to store into, Value to put in)
+    StoreRef(Register, Value),
     /// Load at an index into an array or tuple
     LoadIndex(Register, Register, Value),
     /// Store at an index into an array or tuple

@@ -4,10 +4,10 @@ use std::{cell::RefCell, collections::HashMap, rc::Rc, borrow::Cow, alloc::Layou
 use anyhow::*;
 use itertools::Itertools;
 
-struct Header {
-    ty: Box<ir::Type>, // this could probably be a &'m instead
+struct Header<'m> {
+    ty: &'m ir::Type,
     elements: usize,
-    prev: *mut Header
+    prev: *mut Header<'m>
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -15,7 +15,7 @@ pub struct HeapRef(*mut u8);
 
 pub struct Memory<'w> {
     world: &'w World,
-    last_alloc: *mut Header,
+    last_alloc: *mut Header<'w>,
     max_size: usize, current_size: usize,
 
     pub stack: Vec<Frame>
@@ -175,7 +175,7 @@ impl<'w> Memory<'w> {
     }
 
     /// allocate a new value on the heap, and return a reference value
-    pub fn alloc(&mut self, ty: &ir::Type) -> Result<Value> {
+    pub fn alloc(&mut self, ty: &'w ir::Type) -> Result<Value> {
         if let ir::Type::Array(_) = ty {
             bail!("use alloc_array to allocate arrays");
         }
@@ -197,7 +197,8 @@ impl<'w> Memory<'w> {
                 }
                 // we use the system allocator to get some new memory
                 let mem = std::alloc::alloc(layout) as *mut Header;
-                (&mut *mem).ty = Box::new(ty.clone());
+                (&mut *mem).ty = ty;
+                // (&mut *mem).ty = Box::new(ty.clone());
                 (&mut *mem).elements = 1;
                 // make sure we can still find this allocation if there aren't any other references to
                 // it when we do garbage collection
@@ -206,12 +207,12 @@ impl<'w> Memory<'w> {
                 self.current_size += layout.size();
                 // should this be aligned? how do we know how much padding to allocate until after
                 // we get the pointer?
-                return Ok(Value::Ref(HeapRef(mem.offset(1) as *mut u8)));
+                return Ok(Value::Ref(HeapRef(mem as *mut u8)));
             }
         }
     }
 
-    pub fn alloc_array(&mut self, el_ty: &ir::Type, count: usize) -> Result<Value> {
+    pub fn alloc_array(&mut self, el_ty: &'w ir::Type, count: usize) -> Result<Value> {
         let mut ran_gc = false;
         loop {
             let layout = Layout::from_size_align(size_of::<Header>() + self.world.size_of_type(el_ty)?*count, 
@@ -229,7 +230,7 @@ impl<'w> Memory<'w> {
                 }
                 // we use the system allocator to get some new memory
                 let mem = std::alloc::alloc(layout) as *mut Header;
-                (&mut *mem).ty = Box::new(el_ty.clone());
+                (&mut *mem).ty = el_ty;
                 (&mut *mem).elements = count;
                 // make sure we can still find this allocation if there aren't any other references to
                 // it when we do garbage collection
@@ -237,14 +238,14 @@ impl<'w> Memory<'w> {
                 self.last_alloc = mem;
                 self.current_size += layout.size();
                 // should this be aligned?
-                return Ok(Value::Array(HeapRef(mem.offset(1) as *mut u8)));
+                return Ok(Value::Array(HeapRef(mem as *mut u8)));
             }
         }
     }
 
     pub fn type_for(&self, rf: *mut Value) -> ir::Type {
         let header = unsafe {&*((rf as *mut u8).offset(-(size_of::<Header>() as isize)) as *mut Header)};
-        *(header.ty.clone())
+        (header.ty.clone())
     }
 
     pub fn element_count(&self, rf: *mut Value) -> usize {
@@ -252,7 +253,7 @@ impl<'w> Memory<'w> {
         header.elements
     }
 
-    /// move a value into the heap, returning a reference value
+    /*// move a value into the heap, returning a reference value
     pub fn box_value(&mut self, val: Value) -> Result<Value> {
         match self.alloc(&val.type_of(self))? {
             Value::Ref(r) => {
@@ -261,7 +262,7 @@ impl<'w> Memory<'w> {
             }
             _ => unreachable!()
         }
-    }
+    }*/
 
     /// run garbage collection
     pub fn gc(&mut self) {
@@ -296,6 +297,7 @@ impl Frame {
 
     pub fn convert_value(&self, val: &ir::code::Value) -> Value {
         match val {
+            ir::code::Value::LiteralUnit => Value::Nil,
             ir::code::Value::LiteralInt(d) => Value::Int(*d),
             ir::code::Value::LiteralFloat(d) => Value::Float(*d),
             ir::code::Value::LiteralString(_) => todo!(),

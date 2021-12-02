@@ -33,7 +33,7 @@ impl<'w> Machine<'w> {
     }
 
     /// look up and call a function by interpreting its body to determine the return value
-    fn call_fn(&mut self, body: &ir::FnBody, args: Vec<Value>) -> Result<Value> {
+    fn call_fn(&mut self, body: &'w ir::FnBody, args: Vec<Value>) -> Result<Value> {
         self.mem.stack.push(Frame::new(body.max_registers as usize));
         for (i, v) in args.into_iter().enumerate() {
             self.mem.cur_frame().store(&ir::code::Register(i as u32), v);
@@ -114,13 +114,13 @@ impl<'w> Machine<'w> {
                     Instruction::LoadRef(dest, r#ref) => {
                         match self.mem.cur_frame().load(r#ref) {
                             Value::Ref(r) => self.mem.cur_frame().store(dest, r.value()),
-                            _ => bail!("expected ref")
+                            v => bail!("expected ref, got: {:?}", v)
                         }
                     },
                     Instruction::StoreRef(dest, src) => {
                         match self.mem.cur_frame().load(dest) {
-                            Value::Ref(r) => r.set_value(self.mem.cur_frame().load(src)),
-                            _ => bail!("expected ref")
+                            Value::Ref(r) => r.set_value(self.mem.cur_frame().convert_value(src)),
+                            v => bail!("expected ref, got: {:?}", v)
                         }
                     },
 
