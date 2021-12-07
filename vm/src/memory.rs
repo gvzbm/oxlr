@@ -91,18 +91,22 @@ impl HeapRef {
     pub fn set_value(&self, val: Value) { self.set_value_at_offset(0, self.type_of(), val) }
 
     fn indexed_offset(&self, world: &World, index: usize) -> Result<(usize, &ir::Type)> {
-        match self.type_of() {
-            ir::Type::Array(el_ty) => Ok((index * world.size_of_type(el_ty)?, el_ty)) ,
-            ir::Type::Tuple(ts) => {
-                let mut offset = 0;
-                for t in ts.iter().take(index) {
-                    let ralign = world.required_alignment(t)?;
-                    while offset % ralign != 0 { offset += 1; }
-                    offset += world.size_of_type(t)?;
-                }
-                Ok((offset, &ts[index]))
-            },
-            _ => Err(anyhow!("cannot index into unindexed type"))
+        if self.element_count() > 1 {
+            let el_ty = self.type_of();
+            Ok((index * world.size_of_type(el_ty)?, el_ty))
+        } else {
+            match self.type_of() {
+                ir::Type::Tuple(ts) => {
+                    let mut offset = 0;
+                    for t in ts.iter().take(index) {
+                        let ralign = world.required_alignment(t)?;
+                        while offset % ralign != 0 { offset += 1; }
+                        offset += world.size_of_type(t)?;
+                    }
+                    Ok((offset, &ts[index]))
+                },
+                t => Err(anyhow!("cannot index into unindexed type: {:?}", t))
+            }
         }
     }
 

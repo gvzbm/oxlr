@@ -146,21 +146,21 @@ impl<'w> Machine<'w> {
                             _ => bail!("invalid index")
                         };
                         match self.mem.cur_frame().load(r#ref) {
-                            Value::Ref(r) => self.mem.cur_frame().store(dest, r.indexed_value(self.world, index)?),
-                            _ => bail!("expected ref")
+                            Value::Ref(r) | Value::Array(r) => self.mem.cur_frame().store(dest, r.indexed_value(self.world, index)?),
+                            _ => bail!("expected ref or array")
                         }
                     },
-                    Instruction::StoreIndex(src, r#ref, index) => {
+                    Instruction::StoreIndex(r#ref, index, src) => {
                         let index = match self.mem.cur_frame().convert_value(index) {
                             Value::Int(Integer { signed: false, data, .. }) => data as usize,
                             _ => bail!("invalid index")
                         };
                         match self.mem.cur_frame().load(r#ref) {
-                            Value::Ref(r) => {
-                                let val = self.mem.cur_frame().load(src);
+                            Value::Ref(r) | Value::Array(r) => {
+                                let val = self.mem.cur_frame().convert_value(src);
                                 r.set_indexed_value(self.world, index, val)?
                             },
-                            _ => bail!("expected ref")
+                            _ => bail!("expected ref or array")
                         }
                     }
 

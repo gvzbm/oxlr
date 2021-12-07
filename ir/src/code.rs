@@ -45,9 +45,11 @@ pub enum Instruction {
     /// (Reference to store into, Value to put in)
     StoreRef(Register, Value),
     /// Load at an index into an array or tuple
+    /// (Destination, Reference, Index)
     LoadIndex(Register, Register, Value),
     /// Store at an index into an array or tuple
-    StoreIndex(Register, Register, Value),
+    /// (Reference, Index, Value)
+    StoreIndex(Register, Value, Value),
 
     /// Load a value in a field in a structure
     LoadField(Register, Register, Symbol),
