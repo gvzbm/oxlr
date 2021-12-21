@@ -14,6 +14,7 @@ pub enum Value {
     LiteralInt(Integer),
     LiteralFloat(Float),
     LiteralString(String),
+    LiteralBool(bool),
     Reg(Register)
 }
 
@@ -52,9 +53,11 @@ pub enum Instruction {
     StoreIndex(Register, Value, Value),
 
     /// Load a value in a field in a structure
+    /// (Destination, Reference, Field)
     LoadField(Register, Register, Symbol),
     /// Store a value in a field in a structure
-    StoreField(Register, Register, Symbol),
+    /// (Source, Reference, Field)
+    StoreField(Value, Register, Symbol),
 
     /// (path to function, parameters)
     Call(Register, Path, Vec<Value>),

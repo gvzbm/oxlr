@@ -305,6 +305,7 @@ impl Frame {
             ir::code::Value::LiteralInt(d) => Value::Int(*d),
             ir::code::Value::LiteralFloat(d) => Value::Float(*d),
             ir::code::Value::LiteralString(_) => todo!(),
+            ir::code::Value::LiteralBool(b) => Value::Bool(*b),
             ir::code::Value::Reg(r) => self.registers[r.0 as usize].clone(),
         }
     }

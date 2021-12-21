@@ -133,7 +133,7 @@ impl<'w> Machine<'w> {
                     Instruction::StoreField(src, r#ref, field) => {
                         match self.mem.cur_frame().load(r#ref) {
                             Value::Ref(r) => {
-                                let val = self.mem.cur_frame().load(src);
+                                let val = self.mem.cur_frame().convert_value(src);
                                 r.set_field_value(self.world, field, val)?
                             },
                             _ => bail!("expected ref")
