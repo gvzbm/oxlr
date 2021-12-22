@@ -10,9 +10,14 @@ pub struct World {
 }
 
 fn test_module_file_candidate(dir_entry: &std::fs::DirEntry, path: &ir::Path, version_req: &ir::VersionReq) -> Option<std::path::PathBuf> {
-    let filename = dir_entry.file_name().into_string().ok()?;
-    let (fpath, fver) = filename.split_once('_')?;
+    let mut filename = dir_entry.file_name().into_string().ok()?;
+    if !filename.ends_with(".om") {
+        return None;
+    } else {
+        filename.truncate(filename.len() - 3)
+    }
     log::trace!("testing {} as candidate for module", dir_entry.path().display());
+    let (fpath, fver) = filename.split_once('#')?;
     let fpath = ir::Path::from(fpath);
     let fver = ir::Version::parse(fver).ok()?;
     log::trace!("candidate yielded: {} {}", fpath, fver);
@@ -111,14 +116,19 @@ impl World {
         if let Some(_) = params {
             todo!("compute the size of a specialized generic type");
         } else {
-            // TODO: deal with padding
             match td {
                 ir::TypeDefinition::Sum { variants, .. } => {
                     variants.iter().map(|(_, td)| self.size_of_user_type(td, &None))
                         .fold_ok(0, |a, b| a.max(b))
                 },
                 ir::TypeDefinition::Product { fields, .. } => {
-                    fields.iter().map(|(_,t)| self.size_of_type(t)).fold_ok(0, std::ops::Add::add)
+                    let mut size = 0;
+                    for (_, ty) in fields.iter() {
+                        let ralign = self.required_alignment(ty)?;
+                        while size % ralign != 0 { size += 1; }
+                        size += self.size_of_type(ty)?;
+                    }
+                    Ok(size)
                 }
                 ir::TypeDefinition::NewType(t) => self.size_of_type(t),
             }
@@ -133,11 +143,34 @@ impl World {
             Type::Bool => 1,
             Type::Int { width, .. } => *width as usize / 8,
             Type::Float { width } => *width as usize / 8,
-            Type::Ref(_) | Type::AbstractRef(_) | Type::Array(_) => std::mem::size_of::<*mut usize>(),
-            Type::Tuple(t) => t.iter().map(|t| self.size_of_type(t)).fold_ok(0, std::ops::Add::add)?,
-            Type::User(def_path, params) => self.get_type(def_path).ok_or_else(|| anyhow!(""))
+            Type::Ref(_) | Type::AbstractRef(_) | Type::Array(_) => std::mem::size_of::<crate::memory::HeapRef>(),
+            Type::Tuple(fields) => {
+                let mut size = 0;
+                for ty in fields.iter() {
+                    let ralign = self.required_alignment(ty)?;
+                    while size % ralign != 0 { size += 1; }
+                    size += self.size_of_type(ty)?;
+                }
+                size
+            },
+            Type::User(def_path, params) => self.get_type(def_path).ok_or_else(|| anyhow!("unknown type"))
                 .and_then(|t| self.size_of_user_type(t, params))?,
             Type::FnRef(_) => 0, //for now not sure what we'll actually store here
+            Type::Var(_) => panic!(),
+        })
+    }
+
+    pub fn required_alignment(&self, ty: &ir::Type) -> Result<usize> {
+        use ir::Type;
+        Ok(match ty {
+            Type::Unit => 1,
+            Type::Bool => 1,
+            Type::Int { width, .. } => *width as usize / 8,
+            Type::Float { width } => *width as usize / 8,
+            // TODO: for now, everything gets aligned to the pointer alignment... this is a good
+            // guess, but is it the correct one? I'm not sure
+            Type::Ref(_) | Type::AbstractRef(_) | Type::Array(_)
+                | Type::User(_,_) | Type::Tuple(_) | Type::FnRef(_) => std::mem::align_of::<*mut u8>(),
             Type::Var(_) => panic!(),
         })
     }
