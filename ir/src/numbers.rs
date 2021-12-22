@@ -1,11 +1,17 @@
+//! Runtime variable width integers and floats
 use serde::{Serialize, Deserialize};
 
+/// A variable width integer up to 64 bits
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct Integer {
-    pub width: u8, pub signed: bool,
+    /// The width of the integer. 8, 16, 32 and 64 bits are supported.
+    pub width: u8,
+    pub signed: bool,
+    /// The actual data that stores the number
     pub data: u64
 }
 
+/// A variable width floating point number, of either 32 or 64 bits
 #[derive(Copy, Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum Float {
     F32(f32),
@@ -14,17 +20,21 @@ pub enum Float {
 
 
 impl Integer {
+    /// Create a new variable width integer from a u64 data value
     pub fn new(width: u8, signed: bool, data: u64) -> Integer {
         Integer { width, signed, data }
     }
 
+    /// Create a new unsigned variable width integer from a u64 data value
     pub fn unsigned(width: u8, data: u64) -> Integer {
         Integer { width, signed: false, data }
     }
+    /// Create a new signed variable width integer from a u64 data value
     pub fn signed(width: u8, data: u64) -> Integer {
         Integer { width, signed: true, data }
     }
 
+    /// Compute the bitwise negation of the integer
     pub fn bitwise_negate(&self) -> Integer {
         Integer {
             data: !self.data,
@@ -32,6 +42,7 @@ impl Integer {
         }
     }
 
+    /// Compute the negation of the integer in two's complement representation
     pub fn negate(&self) -> Integer {
         assert!(self.signed);
         Integer {
