@@ -207,7 +207,7 @@ impl<'w> Machine<'w> {
                     Instruction::Return(v) => {
                         log::trace!("return");
                         let rv = self.mem.cur_frame().convert_value(v);
-                        self.mem.stack.pop();
+                        self.mem.pop_stack();
                         return Ok(rv)
                     },
                     Instruction::RefFunc(dest, _) => todo!(),
@@ -222,6 +222,18 @@ impl<'w> Machine<'w> {
                             _ => bail!("invalid count for array alloc")
                         };
                         let nrf = self.mem.alloc_array(r#type, count)?;
+                        self.mem.cur_frame().store(dest, nrf);
+                    },
+                    Instruction::StackAlloc(dest, r#type) => {
+                        let nrf = self.mem.stack_alloc(r#type)?;
+                        self.mem.cur_frame().store(dest, nrf);
+                    },
+                    Instruction::StackAllocArray(dest, r#type, count) => {
+                        let count = match self.mem.cur_frame().convert_value(count) {
+                            Value::Int(Integer { signed: false, data, .. }) => data as usize,
+                            _ => bail!("invalid count for array alloc")
+                        };
+                        let nrf = self.mem.stack_alloc_array(r#type, count)?;
                         self.mem.cur_frame().store(dest, nrf);
                     },
                 }

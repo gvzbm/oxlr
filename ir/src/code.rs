@@ -207,8 +207,24 @@ pub enum Instruction {
 
     /// Allocate a value on the heap of a specified type and put a reference in the destination register
     Alloc(Register, Type),
+
     /// Allocate an array of values on the heap and put an array value reference in the destination register.
     AllocArray(
+        /// Destination register
+        Register,
+        /// Element type
+        Type,
+        /// Number of elements in the array
+        Value
+    ),
+
+    /// Allocate a value on the stack of a specified type and put a reference in the destination register
+    /// The value will be destroyed when the function returns, rendering the reference invalid
+    StackAlloc(Register, Type),
+
+    /// Allocate an array of values on the stack and put an array value reference in the destination register.
+    /// The array will be destroyed when the function returns, rendering the reference invalid
+    StackAllocArray(
         /// Destination register
         Register,
         /// Element type

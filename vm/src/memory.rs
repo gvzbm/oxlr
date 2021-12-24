@@ -1,8 +1,7 @@
 use crate::world::*;
 use crate::value::*;
-use std::{cell::RefCell, collections::HashMap, rc::Rc, borrow::Cow, alloc::Layout, mem::size_of, ptr::null_mut};
+use std::{alloc::Layout, mem::size_of, ptr::null_mut};
 use anyhow::*;
-use itertools::Itertools;
 
 struct Header<'m> {
     ty: &'m ir::Type,
@@ -17,14 +16,6 @@ pub struct Ref {
     ty: Box<ir::Type>,
     /// A raw pointer to the value data
     data: *mut u8
-}
-
-pub struct Memory<'w> {
-    world: &'w World,
-    last_alloc: *mut Header<'w>,
-    max_size: usize, current_size: usize,
-
-    pub stack: Vec<Frame>
 }
 
 impl Ref {
@@ -174,19 +165,28 @@ impl Ref {
     }
 }
 
-//TODO: it is most likely going to be the most convenient to control the layout of memory in the
-//heap. need to transition from using *mut Value in refs to having some sort of heap handle type
-//thing that allows for reading/writing the value in the heap and automatically takes care of field
-//accesses/array indexing. It should be easy to get the right info from the heap metadata and then
-//calculate the byte offset and convert the bytes into a value
+pub struct Memory<'w> {
+    world: &'w World,
+    last_alloc: *mut Header<'w>,
+    max_size: usize, current_size: usize,
+
+    pub stack: Vec<Frame>,
+    stack_data: Vec<u8>,
+    stack_ptr: usize
+}
 
 impl<'w> Memory<'w> {
     pub fn new(world: &'w World) -> Memory {
+        let stack_size = 1024 * 1024; // 1 MiB
+        let mut stack_data = Vec::with_capacity(stack_size);
+        stack_data.resize(stack_size, 0);
         Memory {
             world, last_alloc: null_mut(),
             max_size: 4 * 1024 * 1024 * 1024, // 4GiB
             current_size: 0,
-            stack: Vec::new()
+            stack: Vec::new(),
+            stack_data,
+            stack_ptr: 0
         }
     }
 
@@ -214,7 +214,6 @@ impl<'w> Memory<'w> {
                 // we use the system allocator to get some new memory
                 let mem = std::alloc::alloc(layout) as *mut Header;
                 (&mut *mem).ty = ty;
-                // (&mut *mem).ty = Box::new(ty.clone());
                 (&mut *mem).elements = 1;
                 // make sure we can still find this allocation if there aren't any other references to
                 // it when we do garbage collection
@@ -229,6 +228,34 @@ impl<'w> Memory<'w> {
                 }));
             }
         }
+    }
+
+    /// allocate a new value on the stack, and return a reference value and how much to subtract
+    /// from the stack pointer when fininshed with it
+    pub fn stack_alloc(&mut self, ty: &'w ir::Type) -> Result<Value> {
+        if let ir::Type::Array(_) = ty {
+            bail!("use alloc_array to allocate arrays");
+        }
+
+        let size = self.world.size_of_type(ty)?;
+        if self.stack_ptr + size > self.stack_data.len() {
+            bail!("data stack overflow, increase stack size from {} (attempted to allocate {} for {:?})",
+            self.stack_data.len(), size, ty)
+        }
+        // TODO: this isn't aligned
+        let mem = self.stack_data[self.stack_ptr..].as_ptr() as *mut u8;
+        // Zero out the allocation
+        for x in self.stack_data[self.stack_ptr..(self.stack_ptr+size)].iter_mut() {
+            *x = 0;
+        }
+        self.stack_ptr += size;
+        self.cur_frame().data_stack_size += size;
+        // should this be aligned? how do we know how much padding to allocate until after
+        // we get the pointer?
+        Ok(Value::Ref(Ref {
+            ty: Box::new(ty.clone()),
+            data: mem
+        }))
     }
 
     pub fn alloc_array(&mut self, el_ty: &'w ir::Type, count: usize) -> Result<Value> {
@@ -268,9 +295,35 @@ impl<'w> Memory<'w> {
         }
     }
 
-    pub fn type_for(&self, rf: *mut Value) -> ir::Type {
-        let header = unsafe {&*((rf as *mut u8).offset(-(size_of::<Header>() as isize)) as *mut Header)};
-        (header.ty.clone())
+    /// allocate a new array on the stack, and return a reference value and how much to subtract
+    /// from the stack pointer when fininshed with it
+    pub fn stack_alloc_array(&mut self, el_ty: &'w ir::Type, count: usize) -> Result<Value> {
+        let size = self.world.size_of_type(el_ty)? * count + size_of::<usize>();
+        if self.stack_ptr + size > self.stack_data.len() {
+            bail!("data stack overflow, increase stack size from {} (attempted to allocate {} for array {} x {:?})",
+            self.stack_data.len(), size, count, el_ty)
+        }
+        // TODO: this isn't aligned
+        let mem = self.stack_data[self.stack_ptr..].as_ptr() as *mut u8;
+        // Zero out the allocation
+        for x in self.stack_data[self.stack_ptr..(self.stack_ptr+size)].iter_mut() {
+            *x = 0;
+        }
+        unsafe { *(mem as *mut usize) = count; }
+        self.stack_ptr += size;
+        self.cur_frame().data_stack_size += size;
+        // should this be aligned? how do we know how much padding to allocate until after
+        // we get the pointer?
+        Ok(Value::Ref(Ref {
+            ty: Box::new(ir::Type::Array(Box::new(el_ty.clone()))),
+            data: mem
+        }))
+    }
+
+    /// Pop the data and frame stack
+    pub fn pop_stack(&mut self) {
+        self.stack_ptr -= self.cur_frame().data_stack_size;
+        self.stack.pop();
     }
 
     /// run garbage collection
@@ -286,13 +339,15 @@ impl<'w> Memory<'w> {
 
 #[derive(Debug)]
 pub struct Frame {
-    pub registers: Vec<Value>
+    pub registers: Vec<Value>,
+    pub data_stack_size: usize
 }
 
 impl Frame {
     pub fn new(num_reg: usize) -> Frame {
         Frame {
-            registers: std::iter::repeat(Value::Nil).take(num_reg).collect()
+            registers: std::iter::repeat(Value::Nil).take(num_reg).collect(),
+            data_stack_size: 0
         }
     }
 
