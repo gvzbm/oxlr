@@ -143,7 +143,7 @@ impl World {
             Type::Bool => 1,
             Type::Int { width, .. } => *width as usize / 8,
             Type::Float { width } => *width as usize / 8,
-            Type::Ref(_) | Type::AbstractRef(_) | Type::Array(_) => std::mem::size_of::<crate::memory::HeapRef>(),
+            Type::Ref(_) | Type::AbstractRef(_) | Type::Array(_) => std::mem::size_of::<crate::memory::Ref>(),
             Type::Tuple(fields) => {
                 let mut size = 0;
                 for ty in fields.iter() {
@@ -153,7 +153,8 @@ impl World {
                 }
                 size
             },
-            Type::User(def_path, params) => self.get_type(def_path).ok_or_else(|| anyhow!("unknown type"))
+            Type::User(def_path, params) => self.get_type(def_path)
+                .ok_or_else(|| anyhow!("unknown type ty={:?}", ty))
                 .and_then(|t| self.size_of_user_type(t, params))?,
             Type::FnRef(_) => 0, //for now not sure what we'll actually store here
             Type::Var(_) => panic!(),

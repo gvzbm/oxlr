@@ -8,7 +8,6 @@ Module(
                 (Symbol("a"), Int(signed: false, width: 64)),
                 (Symbol("b"), Int(signed: false, width: 64)),
                 (Symbol("c"), Bool),
-                (Symbol("q"), Ref(Int(signed: false, width: 64))),
             ]
         )
     },

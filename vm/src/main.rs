@@ -124,9 +124,17 @@ impl<'w> Machine<'w> {
                         }
                     },
 
+                    Instruction::RefField(dest, src_ref, field) => {
+                        match self.mem.cur_frame().load(src_ref) {
+                            Value::Ref(r) => self.mem.cur_frame().store(dest,
+                                Value::Ref(r.field(self.world, field)?)),
+                            _ => bail!("expected ref")
+                        }
+                    }
                     Instruction::LoadField(dest, r#ref, field) => {
                         match self.mem.cur_frame().load(r#ref) {
-                            Value::Ref(r) => self.mem.cur_frame().store(dest, r.field_value(self.world, field)?),
+                            Value::Ref(r) => self.mem.cur_frame().store(dest,
+                                r.field(self.world, field)?.value()),
                             _ => bail!("expected ref")
                         }
                     },
@@ -134,19 +142,33 @@ impl<'w> Machine<'w> {
                         match self.mem.cur_frame().load(r#ref) {
                             Value::Ref(r) => {
                                 let val = self.mem.cur_frame().convert_value(src);
-                                r.set_field_value(self.world, field, val)?
+                                r.field(self.world, field)?.set_value(val)
                             },
                             _ => bail!("expected ref")
                         }
                     },
 
+                    Instruction::RefIndex(dest, src_ref, index) => {
+                        let index = match self.mem.cur_frame().convert_value(index) {
+                            Value::Int(Integer { signed: false, data, .. }) => data as usize,
+                            _ => bail!("invalid index")
+                        };
+                        match self.mem.cur_frame().load(src_ref) {
+                            Value::Ref(r) =>
+                                self.mem.cur_frame().store(dest,
+                                    Value::Ref(r.indexed(self.world, index)?)),
+                            _ => bail!("expected ref or array")
+                        }
+                    },
                     Instruction::LoadIndex(dest, r#ref, index) => {
                         let index = match self.mem.cur_frame().convert_value(index) {
                             Value::Int(Integer { signed: false, data, .. }) => data as usize,
                             _ => bail!("invalid index")
                         };
                         match self.mem.cur_frame().load(r#ref) {
-                            Value::Ref(r) | Value::Array(r) => self.mem.cur_frame().store(dest, r.indexed_value(self.world, index)?),
+                            Value::Ref(r) =>
+                                self.mem.cur_frame().store(dest,
+                                    r.indexed(self.world, index)?.value()),
                             _ => bail!("expected ref or array")
                         }
                     },
@@ -156,9 +178,9 @@ impl<'w> Machine<'w> {
                             _ => bail!("invalid index")
                         };
                         match self.mem.cur_frame().load(r#ref) {
-                            Value::Ref(r) | Value::Array(r) => {
+                            Value::Ref(r) => {
                                 let val = self.mem.cur_frame().convert_value(src);
-                                r.set_indexed_value(self.world, index, val)?
+                                r.indexed(self.world, index)?.set_value(val);
                             },
                             _ => bail!("expected ref or array")
                         }

@@ -109,6 +109,26 @@ pub enum Instruction {
         Value
     ),
 
+    /// Compute the reference to a index into a reference to an array or tuple
+    RefIndex(
+        /// Destination register for reference to inner data
+        Register,
+        /// Source container reference
+        Register,
+        /// Index
+        Value
+    ),
+
+    /// Compute the reference to a field within a structure
+    RefField(
+        /// Destination register for reference to inner field
+        Register,
+        /// Source structure reference
+        Register,
+        /// Field name
+        Symbol
+    ),
+
     /// Loads the indexed value starting from zero in the referenced array or tuple on the heap
     LoadIndex(
         /// Destination register
