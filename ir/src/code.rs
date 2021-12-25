@@ -231,6 +231,22 @@ pub enum Instruction {
         Type,
         /// Number of elements in the array
         Value
+    ),
+
+    /// Copy data out of a reference onto the stack, making a new stack allocation. Performs a shallow copy
+    CopyToStack(
+        /// Destination register for stack reference
+        Register,
+        /// Reference to copy to the stack
+        Register
+    ),
+
+    /// Copy data out of a reference onto the heap, making a new heap allocation. Performs a shallow copy
+    CopyToHeap(
+        /// Destination register for heap reference
+        Register,
+        /// Reference to copy into the heap
+        Register
     )
 }
 

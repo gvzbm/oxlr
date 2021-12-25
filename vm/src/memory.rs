@@ -3,30 +3,28 @@ use crate::value::*;
 use std::{alloc::Layout, mem::size_of, ptr::null_mut};
 use anyhow::*;
 
-struct Header<'m> {
-    ty: &'m ir::Type,
+struct Header {
+    ty: Box<ir::Type>,
     elements: usize,
-    prev: *mut Header<'m>
+    prev: *mut Header
 }
 
 /// A reference to a value somewhere else
 #[derive(Clone, Debug, PartialEq)]
 pub struct Ref {
     /// The type of the value behind `data`
-    ty: Box<ir::Type>,
+    pub ty: Box<ir::Type>,
     /// A raw pointer to the value data
-    data: *mut u8
+    pub data: *mut u8
 }
 
 impl Ref {
     pub fn type_of(&self) -> &ir::Type {
-        //unsafe { &(*(self.0 as *mut Header)).ty }
         &self.ty
     }
 
     /// If this reference is to an array, returns the length
     pub fn element_count(&self) -> Option<usize> {
-        // unsafe { (*(self.0 as *mut Header)).elements }
         if let ir::Type::Array(_) = self.ty.as_ref() {
             unsafe {
                 Some(*(self.data as *mut usize))
@@ -167,7 +165,7 @@ impl Ref {
 
 pub struct Memory<'w> {
     world: &'w World,
-    last_alloc: *mut Header<'w>,
+    last_alloc: *mut Header,
     max_size: usize, current_size: usize,
 
     pub stack: Vec<Frame>,
@@ -191,7 +189,7 @@ impl<'w> Memory<'w> {
     }
 
     /// allocate a new value on the heap, and return a reference value
-    pub fn alloc(&mut self, ty: &'w ir::Type) -> Result<Value> {
+    pub fn alloc(&mut self, ty: &ir::Type) -> Result<Value> {
         if let ir::Type::Array(_) = ty {
             bail!("use alloc_array to allocate arrays");
         }
@@ -213,7 +211,9 @@ impl<'w> Memory<'w> {
                 }
                 // we use the system allocator to get some new memory
                 let mem = std::alloc::alloc(layout) as *mut Header;
-                (&mut *mem).ty = ty;
+                // ! funky construction to make sure that Rust doesn't drop the uninitialized box
+                // in ty when it gets replaced with our new box
+                std::mem::forget(std::mem::replace(&mut (&mut *mem).ty, Box::new(ty.clone())));
                 (&mut *mem).elements = 1;
                 // make sure we can still find this allocation if there aren't any other references to
                 // it when we do garbage collection
@@ -230,9 +230,8 @@ impl<'w> Memory<'w> {
         }
     }
 
-    /// allocate a new value on the stack, and return a reference value and how much to subtract
-    /// from the stack pointer when fininshed with it
-    pub fn stack_alloc(&mut self, ty: &'w ir::Type) -> Result<Value> {
+    /// allocate a new value on the stack, and return reference to it
+    pub fn stack_alloc(&mut self, ty: &ir::Type) -> Result<Value> {
         if let ir::Type::Array(_) = ty {
             bail!("use alloc_array to allocate arrays");
         }
@@ -258,11 +257,11 @@ impl<'w> Memory<'w> {
         }))
     }
 
-    pub fn alloc_array(&mut self, el_ty: &'w ir::Type, count: usize) -> Result<Value> {
+
+    pub fn alloc_array(&mut self, el_ty: &ir::Type, count: usize) -> Result<Value> {
         let mut ran_gc = false;
         loop {
-            let layout = Layout::from_size_align(
-                size_of::<Header>() + size_of::<usize>() + self.world.size_of_type(el_ty)?*count, 
+            let layout = Layout::from_size_align(size_of::<Header>() + self.world.array_size(el_ty, count)?, 
                 std::mem::align_of::<Header>())?;
             unsafe {
                 if self.current_size + layout.size() > self.max_size {
@@ -277,7 +276,9 @@ impl<'w> Memory<'w> {
                 }
                 // we use the system allocator to get some new memory
                 let mem = std::alloc::alloc(layout) as *mut Header;
-                (&mut *mem).ty = el_ty;
+                // ! funky construction to make sure that Rust doesn't drop the uninitialized box
+                // in ty when it gets replaced with our new box
+                std::mem::forget(std::mem::replace(&mut (&mut *mem).ty, Box::new(ir::Type::Array(Box::new(el_ty.clone())))));
                 (&mut *mem).elements = count;
                 // make sure we can still find this allocation if there aren't any other references to
                 // it when we do garbage collection
@@ -295,10 +296,9 @@ impl<'w> Memory<'w> {
         }
     }
 
-    /// allocate a new array on the stack, and return a reference value and how much to subtract
-    /// from the stack pointer when fininshed with it
-    pub fn stack_alloc_array(&mut self, el_ty: &'w ir::Type, count: usize) -> Result<Value> {
-        let size = self.world.size_of_type(el_ty)? * count + size_of::<usize>();
+    /// allocate a new array on the stack, and return a reference to it
+    pub fn stack_alloc_array(&mut self, el_ty: &ir::Type, count: usize) -> Result<Value> {
+        let size = self.world.array_size(el_ty, count)?;
         if self.stack_ptr + size > self.stack_data.len() {
             bail!("data stack overflow, increase stack size from {} (attempted to allocate {} for array {} x {:?})",
             self.stack_data.len(), size, count, el_ty)

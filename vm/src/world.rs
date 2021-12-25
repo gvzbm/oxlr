@@ -161,6 +161,10 @@ impl World {
         })
     }
 
+    pub fn array_size(&self, el_ty: &ir::Type, count: usize) -> Result<usize> {
+        Ok(std::mem::size_of::<usize>() + self.size_of_type(el_ty)?*count)
+    }
+
     pub fn required_alignment(&self, ty: &ir::Type) -> Result<usize> {
         use ir::Type;
         Ok(match ty {

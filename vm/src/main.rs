@@ -10,6 +10,14 @@ use world::World;
 use value::*;
 use memory::{Memory, Frame};
 
+unsafe fn memcpy(src: *const u8, dest: *mut u8, size: usize) {
+    let src_data = std::slice::from_raw_parts(src, size);
+    let dest_data = std::slice::from_raw_parts_mut(dest, size);
+    for (s, d) in src_data.iter().zip(dest_data.iter_mut()) {
+        *d = *s;
+    }
+}
+
 struct Machine<'w> {
     world: &'w World,
     mem: Memory<'w>,
@@ -236,6 +244,48 @@ impl<'w> Machine<'w> {
                         let nrf = self.mem.stack_alloc_array(r#type, count)?;
                         self.mem.cur_frame().store(dest, nrf);
                     },
+
+                    Instruction::CopyToStack(dest, src) => {
+                        match self.mem.cur_frame().load(src) {
+                            Value::Ref(memory::Ref { ty, data }) => {
+                                let (copy, size) = if let ir::Type::Array(el_ty) = ty.as_ref() {
+                                    let count = unsafe { *(data as *mut usize) };
+                                    (self.mem.stack_alloc_array(el_ty.as_ref(), count)?,
+                                        self.world.array_size(el_ty, count)?)
+                                } else {
+                                    (self.mem.stack_alloc(ty.as_ref())?,
+                                        self.world.size_of_type(ty.as_ref())?)
+                                };
+                                if let Value::Ref(copy) = &copy {
+                                    unsafe { memcpy(data, copy.data, size); }
+                                } else { unreachable!() }
+                                self.mem.cur_frame().store(dest, copy);
+                            }
+                            _ => bail!("expected ref")
+                        }
+                    },
+
+                    // sad code duplication - should there just be a single alloc function with a
+                    // destination argument instead?
+                    Instruction::CopyToHeap(dest, src) => {
+                        match self.mem.cur_frame().load(src) {
+                            Value::Ref(memory::Ref { ty, data }) => {
+                                let (copy, size) = if let ir::Type::Array(el_ty) = ty.as_ref() {
+                                    let count = unsafe { *(data as *mut usize) };
+                                    (self.mem.alloc_array(el_ty.as_ref(), count)?,
+                                        self.world.array_size(el_ty, count)?)
+                                } else {
+                                    (self.mem.alloc(ty.as_ref())?,
+                                        self.world.size_of_type(ty.as_ref())?)
+                                };
+                                if let Value::Ref(copy) = &copy {
+                                    unsafe { memcpy(data, copy.data, size); }
+                                } else { unreachable!() }
+                                self.mem.cur_frame().store(dest, copy);
+                            }
+                            _ => bail!("expected ref")
+                        }
+                    }
                 }
             }
             prev_block_index = Some(cur_block_index);
