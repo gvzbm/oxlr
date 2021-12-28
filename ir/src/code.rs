@@ -109,6 +109,26 @@ pub enum Instruction {
         Value
     ),
 
+    /// Compute the reference to a index into a reference to an array or tuple
+    RefIndex(
+        /// Destination register for reference to inner data
+        Register,
+        /// Source container reference
+        Register,
+        /// Index
+        Value
+    ),
+
+    /// Compute the reference to a field within a structure
+    RefField(
+        /// Destination register for reference to inner field
+        Register,
+        /// Source structure reference
+        Register,
+        /// Field name
+        Symbol
+    ),
+
     /// Loads the indexed value starting from zero in the referenced array or tuple on the heap
     LoadIndex(
         /// Destination register
@@ -187,6 +207,7 @@ pub enum Instruction {
 
     /// Allocate a value on the heap of a specified type and put a reference in the destination register
     Alloc(Register, Type),
+
     /// Allocate an array of values on the heap and put an array value reference in the destination register.
     AllocArray(
         /// Destination register
@@ -195,6 +216,37 @@ pub enum Instruction {
         Type,
         /// Number of elements in the array
         Value
+    ),
+
+    /// Allocate a value on the stack of a specified type and put a reference in the destination register
+    /// The value will be destroyed when the function returns, rendering the reference invalid
+    StackAlloc(Register, Type),
+
+    /// Allocate an array of values on the stack and put an array value reference in the destination register.
+    /// The array will be destroyed when the function returns, rendering the reference invalid
+    StackAllocArray(
+        /// Destination register
+        Register,
+        /// Element type
+        Type,
+        /// Number of elements in the array
+        Value
+    ),
+
+    /// Copy data out of a reference onto the stack, making a new stack allocation. Performs a shallow copy
+    CopyToStack(
+        /// Destination register for stack reference
+        Register,
+        /// Reference to copy to the stack
+        Register
+    ),
+
+    /// Copy data out of a reference onto the heap, making a new heap allocation. Performs a shallow copy
+    CopyToHeap(
+        /// Destination register for heap reference
+        Register,
+        /// Reference to copy into the heap
+        Register
     )
 }
 

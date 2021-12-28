@@ -6,7 +6,8 @@ pub enum Value {
     Nil, Bool(bool),
     Int(Integer),
     Float(Float),
-    Ref(crate::memory::HeapRef), Array(crate::memory::HeapRef), Fn
+    Ref(crate::memory::Ref),
+    Fn
 }
 
 impl Value {
@@ -17,7 +18,6 @@ impl Value {
             Value::Int(i) => ir::Type::Int { signed: i.signed, width: i.width },
             Value::Float(f) => ir::Type::Float { width: f.width() },
             Value::Ref(v) => v.type_of().clone(),
-            Value::Array(v) => v.type_of().clone(),
             Value::Fn => ir::Type::FnRef(todo!()),
         }
     }

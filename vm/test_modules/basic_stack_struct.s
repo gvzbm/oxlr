@@ -1,5 +1,5 @@
 Module(
-    path: Path([Symbol("basic_struct")]),
+    path: Path([Symbol("basic_stack_struct")]),
     version: "0.0.1",
     types: {
         Symbol("foo"): Product(
@@ -21,7 +21,7 @@ Module(
                 blocks: [
                     BasicBlock(
                         instrs: [
-                            Alloc(Register(0), User(Path([Symbol("basic_struct"), Symbol("foo")]), None)),
+                            StackAlloc(Register(0), User(Path([Symbol("basic_stack_struct"), Symbol("foo")]), None)),
                             StoreField(LiteralInt(Integer(width: 64, signed: false, data: 3)), Register(0), Symbol("a")),
                             StoreField(LiteralInt(Integer(width: 64, signed: false, data: 9)), Register(0), Symbol("b")),
                             StoreField(LiteralBool(true), Register(0), Symbol("c")),

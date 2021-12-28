@@ -1,39 +1,44 @@
 use crate::world::*;
 use crate::value::*;
-use std::{cell::RefCell, collections::HashMap, rc::Rc, borrow::Cow, alloc::Layout, mem::size_of, ptr::null_mut};
+use std::{alloc::Layout, mem::size_of, ptr::null_mut};
 use anyhow::*;
-use itertools::Itertools;
 
-struct Header<'m> {
-    ty: &'m ir::Type,
+struct Header {
+    ty: Box<ir::Type>,
     elements: usize,
-    prev: *mut Header<'m>
+    prev: *mut Header
 }
 
+/// A reference to a value somewhere else
 #[derive(Clone, Debug, PartialEq)]
-pub struct HeapRef(*mut u8);
-
-pub struct Memory<'w> {
-    world: &'w World,
-    last_alloc: *mut Header<'w>,
-    max_size: usize, current_size: usize,
-
-    pub stack: Vec<Frame>
+pub struct Ref {
+    /// The type of the value behind `data`
+    pub ty: Box<ir::Type>,
+    /// A raw pointer to the value data
+    pub data: *mut u8
 }
 
-impl HeapRef {
+impl Ref {
     pub fn type_of(&self) -> &ir::Type {
-        unsafe { &(*(self.0 as *mut Header)).ty }
+        &self.ty
     }
 
-    pub fn element_count(&self) -> usize {
-        unsafe { (*(self.0 as *mut Header)).elements }
+    /// If this reference is to an array, returns the length
+    pub fn element_count(&self) -> Option<usize> {
+        if let ir::Type::Array(_) = self.ty.as_ref() {
+            unsafe {
+                Some(*(self.data as *mut usize))
+            }
+        } else {
+            None
+        }
     }
 
-    fn value_at_offset(&self, offset_in_bytes: usize, ty: &ir::Type) -> Value {
+    /// Read the date inside the ref and return it as a Value
+    pub fn value(&self) -> Value {
         unsafe {
-            let ptr = self.0.offset((std::mem::size_of::<Header>() + offset_in_bytes) as isize);
-            match ty {
+            let ptr = self.data;
+            match self.ty.as_ref() {
                 ir::Type::Unit => Value::Nil,
                 ir::Type::Bool => Value::Bool(*ptr > 0),
                 ir::Type::Int { signed, width } => {
@@ -47,19 +52,21 @@ impl HeapRef {
                 },
                 // TODO: this is quite unsafe, really we should have some way to validate that this
                 // is a valid pointer. Perhaps though since this is a private interface it's fine.
-                ir::Type::Array(_) => Value::Array(HeapRef(*(ptr as *mut *mut u8))),
-                ir::Type::Ref(_) | ir::Type::AbstractRef(_) 
-                    => Value::Ref(HeapRef(*(ptr as *mut *mut u8))),
+                ir::Type::Ref(_) | ir::Type::Array(_) => Value::Ref(Ref {
+                    ty: self.ty.clone(),
+                    data: *(ptr as *mut *mut u8)
+                }),
+                ir::Type::AbstractRef(_) => todo!(),
                 _ => todo!()
             }
         }
     }
 
-    // `ty` is the type of the thing that is already there
-    fn set_value_at_offset(&self, offset_in_bytes: usize, ty: &ir::Type, val: Value) {
+    /// Move the data from the value into the ref
+    pub fn set_value(&self, val: Value) {
         unsafe {
-            let ptr = self.0.offset((std::mem::size_of::<Header>() + offset_in_bytes) as isize);
-            match (ty, val) {
+            let ptr = self.data;
+            match (self.ty.as_ref(), val) {
                 (ir::Type::Bool, Value::Bool(b)) => {
                     *ptr = if b { 1 } else { 0 };
                 },
@@ -73,59 +80,60 @@ impl HeapRef {
                         _ => panic!()
                     }
                 },
-                (ir::Type::Array(_), Value::Array(r)) => {
-                    // should we validate the element type here?
-                    *(ptr as *mut *mut u8) = r.0;
-                }
-                (ir::Type::Ref(_) | ir::Type::AbstractRef(_), Value::Ref(r)) => {
+                // handle nested references
+                (ir::Type::Ref(_), Value::Ref(r)) => {
                     // should we validate the type here?
-                    *(ptr as *mut *mut u8) = r.0;
-                }
-                _ => todo!()
-            }
-        }
-    }
-
-
-    pub fn value(&self) -> Value { self.value_at_offset(0, self.type_of()) }
-    pub fn set_value(&self, val: Value) { self.set_value_at_offset(0, self.type_of(), val) }
-
-    fn indexed_offset(&self, world: &World, index: usize) -> Result<(usize, &ir::Type)> {
-        if self.element_count() > 1 {
-            let el_ty = self.type_of();
-            Ok((index * world.size_of_type(el_ty)?, el_ty))
-        } else {
-            match self.type_of() {
-                ir::Type::Tuple(ts) => {
-                    let mut offset = 0;
-                    for t in ts.iter().take(index) {
-                        let ralign = world.required_alignment(t)?;
-                        while offset % ralign != 0 { offset += 1; }
-                        offset += world.size_of_type(t)?;
-                    }
-                    Ok((offset, &ts[index]))
+                    *(ptr as *mut *mut u8) = r.data;
                 },
-                t => Err(anyhow!("cannot index into unindexed type: {:?}", t))
+                (ir::Type::Array(_), Value::Ref(r)) => {
+                    // should we validate the type here?
+                    if let ir::Type::Array(_) = r.type_of() {
+                        *(ptr as *mut *mut u8) = r.data;
+                    } else {
+                        panic!()
+                    }
+                }
+                t => todo!("set value on ref with unimpl inner type {:?}", t)
             }
         }
     }
 
-    pub fn indexed_value(&self, world: &World, index: usize) -> Result<Value> {
-        let (offset, ty) = self.indexed_offset(world, index)?;
-        Ok(self.value_at_offset(offset, ty))
+    pub fn indexed(&self, world: &World, index: usize) -> Result<Ref> {
+        //TODO: bounds checking
+        match self.type_of() {
+            ir::Type::Array(el_ty) => {
+                Ok(Ref {
+                    data: unsafe {
+                        self.data.offset((std::mem::size_of::<usize>() + index * world.size_of_type(el_ty)?) as isize)
+                    },
+                    ty: el_ty.clone()
+                })
+            },
+            ir::Type::Tuple(ts) => {
+                let mut offset = 0;
+                for t in ts.iter().take(index) {
+                    let ralign = world.required_alignment(t)?; 
+                    while offset % ralign != 0 { offset += 1; }
+                    offset += world.size_of_type(t)?;
+                }
+                Ok(Ref {
+                    data: unsafe { self.data.offset(offset as isize) },
+                    ty: Box::new(ts[index].clone())
+                })
+            },
+            t => Err(anyhow!("cannot index into unindexed type: {:?}", t))
+        }
     }
 
-    pub fn set_indexed_value(&self, world: &World, index: usize, val: Value) -> Result<()> {
-        let (offset, ty) = self.indexed_offset(world, index)?;
-        Ok(self.set_value_at_offset(offset, ty, val))
-    }
-
-    fn field_offset<'w>(&self, world: &'w World, field: &ir::Symbol) -> Result<(usize, &'w ir::Type)> {
+    pub fn field<'w>(&self, world: &'w World, field: &ir::Symbol) -> Result<Ref> {
         match self.type_of() {
             ir::Type::User(path, None) => {
                 match world.get_type(path) {
                     Some(ir::TypeDefinition::NewType(ty)) => {
-                        Ok((0, ty)) // should probably check what the field name is?
+                        Ok(Ref {
+                            ty: Box::new(ty.clone()),
+                            data: self.data
+                        }) // should probably check what the field name is?
                     },
                     Some(ir::TypeDefinition::Sum { .. }) => {
                         Err(anyhow!("invalid type for field lookup"))
@@ -138,48 +146,50 @@ impl HeapRef {
                                 while offset % ralign != 0 { offset += 1; }
                                 offset += world.size_of_type(t)?;
                             }
-                            Ok((offset, ty))
+                            Ok(Ref {
+                                ty: Box::new(ty.clone()),
+                                data: unsafe { self.data.offset(offset as isize) }
+                            })
                         } else {
                             Err(anyhow!("field not defined on type"))
                         }
                     },
-                    None => Err(anyhow!("unknown type")),
+                    None => Err(anyhow!("unknown type, path = {}, field = {:?}", path, field)),
                 }
             },
             ir::Type::User(path, Some(params)) => todo!(),
             _ => Err(anyhow!("invalid type for field lookup"))
         }
     }
-
-    pub fn field_value(&self, world: &World, field: &ir::Symbol) -> Result<Value> {
-        let (offset, ty) = self.field_offset(world, field)?;
-        Ok(self.value_at_offset(offset, ty))
-    }
-
-    pub fn set_field_value(&self, world: &World, field: &ir::Symbol, val: Value) -> Result<()> {
-        let (offset, ty) = self.field_offset(world, field)?;
-        Ok(self.set_value_at_offset(offset, ty, val))
-    }
 }
 
-//TODO: it is most likely going to be the most convenient to control the layout of memory in the
-//heap. need to transition from using *mut Value in refs to having some sort of heap handle type
-//thing that allows for reading/writing the value in the heap and automatically takes care of field
-//accesses/array indexing. It should be easy to get the right info from the heap metadata and then
-//calculate the byte offset and convert the bytes into a value
+pub struct Memory<'w> {
+    world: &'w World,
+    last_alloc: *mut Header,
+    max_size: usize, current_size: usize,
+
+    pub stack: Vec<Frame>,
+    stack_data: Vec<u8>,
+    stack_ptr: usize
+}
 
 impl<'w> Memory<'w> {
     pub fn new(world: &'w World) -> Memory {
+        let stack_size = 1024 * 1024; // 1 MiB
+        let mut stack_data = Vec::with_capacity(stack_size);
+        stack_data.resize(stack_size, 0);
         Memory {
             world, last_alloc: null_mut(),
             max_size: 4 * 1024 * 1024 * 1024, // 4GiB
             current_size: 0,
-            stack: Vec::new()
+            stack: Vec::new(),
+            stack_data,
+            stack_ptr: 0
         }
     }
 
     /// allocate a new value on the heap, and return a reference value
-    pub fn alloc(&mut self, ty: &'w ir::Type) -> Result<Value> {
+    pub fn alloc(&mut self, ty: &ir::Type) -> Result<Value> {
         if let ir::Type::Array(_) = ty {
             bail!("use alloc_array to allocate arrays");
         }
@@ -201,8 +211,9 @@ impl<'w> Memory<'w> {
                 }
                 // we use the system allocator to get some new memory
                 let mem = std::alloc::alloc(layout) as *mut Header;
-                (&mut *mem).ty = ty;
-                // (&mut *mem).ty = Box::new(ty.clone());
+                // ! funky construction to make sure that Rust doesn't drop the uninitialized box
+                // in ty when it gets replaced with our new box
+                std::mem::forget(std::mem::replace(&mut (&mut *mem).ty, Box::new(ty.clone())));
                 (&mut *mem).elements = 1;
                 // make sure we can still find this allocation if there aren't any other references to
                 // it when we do garbage collection
@@ -211,15 +222,46 @@ impl<'w> Memory<'w> {
                 self.current_size += layout.size();
                 // should this be aligned? how do we know how much padding to allocate until after
                 // we get the pointer?
-                return Ok(Value::Ref(HeapRef(mem as *mut u8)));
+                return Ok(Value::Ref(Ref {
+                    ty: Box::new(ty.clone()),
+                    data: mem.offset(1) as *mut u8
+                }));
             }
         }
     }
 
-    pub fn alloc_array(&mut self, el_ty: &'w ir::Type, count: usize) -> Result<Value> {
+    /// allocate a new value on the stack, and return reference to it
+    pub fn stack_alloc(&mut self, ty: &ir::Type) -> Result<Value> {
+        if let ir::Type::Array(_) = ty {
+            bail!("use alloc_array to allocate arrays");
+        }
+
+        let size = self.world.size_of_type(ty)?;
+        if self.stack_ptr + size > self.stack_data.len() {
+            bail!("data stack overflow, increase stack size from {} (attempted to allocate {} for {:?})",
+            self.stack_data.len(), size, ty)
+        }
+        // TODO: this isn't aligned
+        let mem = self.stack_data[self.stack_ptr..].as_ptr() as *mut u8;
+        // Zero out the allocation
+        for x in self.stack_data[self.stack_ptr..(self.stack_ptr+size)].iter_mut() {
+            *x = 0;
+        }
+        self.stack_ptr += size;
+        self.cur_frame().data_stack_size += size;
+        // should this be aligned? how do we know how much padding to allocate until after
+        // we get the pointer?
+        Ok(Value::Ref(Ref {
+            ty: Box::new(ty.clone()),
+            data: mem
+        }))
+    }
+
+
+    pub fn alloc_array(&mut self, el_ty: &ir::Type, count: usize) -> Result<Value> {
         let mut ran_gc = false;
         loop {
-            let layout = Layout::from_size_align(size_of::<Header>() + self.world.size_of_type(el_ty)?*count, 
+            let layout = Layout::from_size_align(size_of::<Header>() + self.world.array_size(el_ty, count)?, 
                 std::mem::align_of::<Header>())?;
             unsafe {
                 if self.current_size + layout.size() > self.max_size {
@@ -234,39 +276,55 @@ impl<'w> Memory<'w> {
                 }
                 // we use the system allocator to get some new memory
                 let mem = std::alloc::alloc(layout) as *mut Header;
-                (&mut *mem).ty = el_ty;
+                // ! funky construction to make sure that Rust doesn't drop the uninitialized box
+                // in ty when it gets replaced with our new box
+                std::mem::forget(std::mem::replace(&mut (&mut *mem).ty, Box::new(ir::Type::Array(Box::new(el_ty.clone())))));
                 (&mut *mem).elements = count;
                 // make sure we can still find this allocation if there aren't any other references to
                 // it when we do garbage collection
                 (&mut *mem).prev = self.last_alloc;
+                let sizep = mem.offset(1);
+                *(sizep as *mut usize)  = count;
                 self.last_alloc = mem;
                 self.current_size += layout.size();
                 // should this be aligned?
-                return Ok(Value::Array(HeapRef(mem as *mut u8)));
+                return Ok(Value::Ref(Ref {
+                    ty: Box::new(ir::Type::Array(Box::new(el_ty.clone()))),
+                    data: (sizep as *mut u8)
+                }));
             }
         }
     }
 
-    pub fn type_for(&self, rf: *mut Value) -> ir::Type {
-        let header = unsafe {&*((rf as *mut u8).offset(-(size_of::<Header>() as isize)) as *mut Header)};
-        (header.ty.clone())
-    }
-
-    pub fn element_count(&self, rf: *mut Value) -> usize {
-        let header = unsafe {&*((rf as *mut u8).offset(-(size_of::<Header>() as isize)) as *mut Header)};
-        header.elements
-    }
-
-    /*// move a value into the heap, returning a reference value
-    pub fn box_value(&mut self, val: Value) -> Result<Value> {
-        match self.alloc(&val.type_of(self))? {
-            Value::Ref(r) => {
-                r.set_value(val);
-                Ok(Value::Ref(r))
-            }
-            _ => unreachable!()
+    /// allocate a new array on the stack, and return a reference to it
+    pub fn stack_alloc_array(&mut self, el_ty: &ir::Type, count: usize) -> Result<Value> {
+        let size = self.world.array_size(el_ty, count)?;
+        if self.stack_ptr + size > self.stack_data.len() {
+            bail!("data stack overflow, increase stack size from {} (attempted to allocate {} for array {} x {:?})",
+            self.stack_data.len(), size, count, el_ty)
         }
-    }*/
+        // TODO: this isn't aligned
+        let mem = self.stack_data[self.stack_ptr..].as_ptr() as *mut u8;
+        // Zero out the allocation
+        for x in self.stack_data[self.stack_ptr..(self.stack_ptr+size)].iter_mut() {
+            *x = 0;
+        }
+        unsafe { *(mem as *mut usize) = count; }
+        self.stack_ptr += size;
+        self.cur_frame().data_stack_size += size;
+        // should this be aligned? how do we know how much padding to allocate until after
+        // we get the pointer?
+        Ok(Value::Ref(Ref {
+            ty: Box::new(ir::Type::Array(Box::new(el_ty.clone()))),
+            data: mem
+        }))
+    }
+
+    /// Pop the data and frame stack
+    pub fn pop_stack(&mut self) {
+        self.stack_ptr -= self.cur_frame().data_stack_size;
+        self.stack.pop();
+    }
 
     /// run garbage collection
     pub fn gc(&mut self) {
@@ -281,13 +339,15 @@ impl<'w> Memory<'w> {
 
 #[derive(Debug)]
 pub struct Frame {
-    pub registers: Vec<Value>
+    pub registers: Vec<Value>,
+    pub data_stack_size: usize
 }
 
 impl Frame {
     pub fn new(num_reg: usize) -> Frame {
         Frame {
-            registers: std::iter::repeat(Value::Nil).take(num_reg).collect()
+            registers: std::iter::repeat(Value::Nil).take(num_reg).collect(),
+            data_stack_size: 0
         }
     }
 
